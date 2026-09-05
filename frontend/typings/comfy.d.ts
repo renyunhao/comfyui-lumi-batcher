@@ -92,6 +92,7 @@ export namespace Comfy {
     {
       inputs: Record<string, string | number | unknown[]>;
       class_type: string;
+      _meta?: { title?: string };
     }
   >;
   export interface GraphPrompt {

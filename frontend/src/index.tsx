@@ -4,7 +4,7 @@
 import '@arco-design/web-react/dist/css/arco.css';
 import { registerBatchToolsV2Btn } from './batch-tools/utils';
 
-import '@arco-design/theme-babeta/index.less';
+import '@arco-design/web-react/dist/css/index.less';
 import '@common/styles/index.scss';
 
 export const registerBatchInTheRoom = () => {

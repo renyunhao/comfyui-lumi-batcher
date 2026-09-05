@@ -11,8 +11,7 @@
     "preview": "rsbuild preview"
   },
   "dependencies": {
-    "@arco-design/theme-babeta": "1.0.2-beta.37",
-    "@arco-design/web-react": "^2.66.1",
+    "@arco-design/web-react": "^2.66.16",
     "@datarangers/sdk-javascript": "^0.1.0",
     "@fingerprintjs/fingerprintjs": "^4.6.1",
     "@rsbuild/plugin-less": "^1.2.2",

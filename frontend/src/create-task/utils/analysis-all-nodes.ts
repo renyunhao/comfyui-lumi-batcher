@@ -11,7 +11,9 @@ export const analysisAllNodes = () =>
 
     Object.keys(output).forEach((id) => {
       const nodeInfo = output[id];
-      const { class_type, inputs } = nodeInfo;
+      const { class_type, inputs, _meta } = nodeInfo;
+      const title =
+        _meta?.title || window.app?.graph?.getNodeById(id)?.title || '';
       const paramsList: AllNodesOptions[0]['paramsList'] = [];
 
       Object.keys(inputs).forEach((key) => {
@@ -26,7 +28,10 @@ export const analysisAllNodes = () =>
 
       allNodesOptions.push({
         id,
-        label: `#${id}: ${class_type}`,
+        label:
+          title && title !== class_type
+            ? `#${id}: ${class_type} (${title})`
+            : `#${id}: ${class_type}`,
         paramsList,
       });
     });
