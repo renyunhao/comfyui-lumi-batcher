@@ -37,6 +37,7 @@ import {
 import { TemplateFileType } from '@common/constant/creator';
 import { SpecialOutputSuffix } from '@common/constant/params-config';
 import { uuid } from '@common/utils/uuid';
+import { getInputFiles } from '@api/input-files';
 
 interface InputParamsValueProps {
   onChange: (value: ValueBaseType[]) => void;
@@ -74,12 +75,19 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
   const [inputValue, setInputValue] = useState<string | string[]>('');
   const [popupVisible, setPopupVisible] = useState<boolean>(false);
   const [isEditing, setIsEditing] = useState(false);
+  /** input 目录（含子目录）下的图片相对路径列表 */
+  const [inputImageFiles, setInputImageFiles] = useState<string[]>([]);
+  /** 下拉列表最大高度，弹出时按输入框到屏幕底部的距离自适应 */
+  const [dropdownMaxHeight, setDropdownMaxHeight] = useState<string>();
 
   const nodeInfo = currentParamConfig?.nodeId
     ? currentNodeInfoMap[getNodeInfoKey(currentParamConfig)]
     : ({} as NodeInfo);
 
-  const matchSelector = nodeInfo?.paramOptions?.length > 0;
+  const matchSelector =
+    nodeInfo?.paramOptions?.length > 0 ||
+    (nodeInfo?.paramType === ValueTypeEnum.IMAGE &&
+      inputImageFiles.length > 0);
 
   useEffect(() => {
     if (!currentParamConfig.nodeId) {
@@ -93,6 +101,26 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
 
     updateCurrentNodeInfoMap(n.key, n);
   }, [currentParamConfig]);
+
+  // 图片参数：拉取 input 目录（含子目录）下的图片，用于快速选择
+  useEffect(() => {
+    if (nodeInfo?.paramType !== ValueTypeEnum.IMAGE) {
+      return;
+    }
+    let cancelled = false;
+    getInputFiles('image')
+      .then((res) => {
+        if (!cancelled) {
+          setInputImageFiles(res?.data ?? []);
+        }
+      })
+      .catch((e) => {
+        console.error('获取 input 图片列表失败:', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeInfo?.paramType]);
 
   const handleChange = (newValue?: any) => {
     const lastValue = newValue || value;
@@ -170,9 +198,9 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
   );
 
   // 增加类型过滤，图片、视频需要过滤候选值列表数据
-  const options = useMemo(
-    () =>
-      (nodeInfo?.paramOptions || []).filter((v) => {
+  const options = useMemo(() => {
+    const base = (nodeInfo?.paramOptions || [])
+      .filter((v) => {
         if (nodeInfo.paramType === ValueTypeEnum.IMAGE) {
           return RE_IMAGE_SUFFIX.test(String(v).toLowerCase());
         } else if (nodeInfo.paramType === ValueTypeEnum.VIDEO) {
@@ -180,9 +208,37 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
         } else {
           return true;
         }
-      }),
-    [nodeInfo],
-  );
+      })
+      .map((v) => String(v));
+
+    // 图片参数：合并 input 目录（含子目录）下的图片，列表名显示相对路径
+    if (nodeInfo?.paramType === ValueTypeEnum.IMAGE && inputImageFiles.length) {
+      const merged = [...base];
+      const existed = new Set(merged);
+      inputImageFiles.forEach((p) => {
+        if (!existed.has(p)) {
+          merged.push(p);
+          existed.add(p);
+        }
+      });
+      return merged.sort((a, b) => a.localeCompare(b));
+    }
+
+    return base;
+  }, [nodeInfo, inputImageFiles]);
+
+  /** 弹出时按输入框到屏幕底部的可用空间自适应下拉列表高度 */
+  const updateDropdownHeight = () => {
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+    const margin = 16;
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    const available = Math.max(spaceBelow, spaceAbove);
+    setDropdownMaxHeight(`${Math.max(available, 200)}px`);
+  };
 
   return (
     <div
@@ -248,10 +304,19 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
               ? rootRef.current || document.body
               : document.body
           }
+          dropdownMenuStyle={{
+            maxHeight: dropdownMaxHeight,
+          }}
           suffixIcon={SuffixComp}
           onFocus={() => {
             setIsEditing(false);
+            updateDropdownHeight();
             setPopupVisible(true);
+          }}
+          onVisibleChange={(visible) => {
+            if (visible) {
+              updateDropdownHeight();
+            }
           }}
           onBlur={onBlur}
           onKeyDown={(e) => {

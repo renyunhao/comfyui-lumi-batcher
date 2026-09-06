@@ -529,6 +529,36 @@ class BatchToolsHandler:
                     headers=headers,
                 )
 
+        @server.PromptServer.instance.routes.get(getApiPath("/input-files"))
+        async def list_input_files(request):
+            try:
+                resp_code = 200
+                content_type = request.rel_url.query.get("type", "image")
+                allowed_types = {"image", "video", "audio"}
+                if content_type not in allowed_types:
+                    return web.json_response(
+                        getErrorResponse(
+                            ValueError(content_type), "type 参数不合法"
+                        )
+                    )
+
+                input_dir = folder_paths.get_input_directory()
+                files, _ = folder_paths.recursive_search(
+                    input_dir, excluded_dir_names=[".git"]
+                )
+                files = folder_paths.filter_files_content_types(
+                    files, [content_type]
+                )
+                # 统一返回相对 input 目录、以 / 分隔的路径
+                data = sorted(f.replace(os.sep, "/") for f in files)
+
+                response = {"code": resp_code, "message": "获取输入文件列表成功", "data": data}
+                return web.json_response(response)
+            except Exception as e:
+                return web.json_response(
+                    getErrorResponse(e, "获取输入文件列表失败")
+                )
+
         @server.PromptServer.instance.routes.post(getApiPath("/batch-task/cancel"))
         async def cancelTask(request):
             try:
