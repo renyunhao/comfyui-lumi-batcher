@@ -35,6 +35,27 @@ export interface NodeInfo {
   nodeInfo: Comfy.Node | null;
 }
 
+/**
+ * 按 id 查找图节点。子图内部节点在 graphToPrompt 中会被展开为
+ * "外层id:内层id" 形式的组合 id，根图 getNodeById 查不到，
+ * 需要通过外层节点的 getInnerNodes 解析。
+ */
+const findNodeById = (nodeId: string | number) => {
+  const graph = window.app.graph;
+  const node = graph.getNodeById(nodeId);
+  if (node) {
+    return node;
+  }
+  const idStr = String(nodeId);
+  if (!idStr.includes(':')) {
+    return null;
+  }
+  const outerNode = graph.getNodeById(idStr.split(':')[0]);
+  // @ts-ignore 子图节点提供 getInnerNodes，返回带展开后组合 id 的内部节点
+  const innerNodes = outerNode?.getInnerNodes?.(new Map()) ?? [];
+  return innerNodes.find((n: any) => String(n.id) === idStr) ?? null;
+};
+
 /** 获取节点信息 */
 export const getNodeInfo = (
   nodeId: string | number | undefined,
@@ -44,7 +65,7 @@ export const getNodeInfo = (
     return {} as NodeInfo;
   }
 
-  const nodeInfo = window.app.graph.getNodeById(nodeId);
+  const nodeInfo = findNodeById(nodeId);
 
   const paramsInfo = nodeInfo?.widgets.find(
     // @ts-ignore
