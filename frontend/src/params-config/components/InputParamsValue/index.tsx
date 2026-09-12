@@ -37,6 +37,7 @@ import {
 import { TemplateFileType } from '@common/constant/creator';
 import { SpecialOutputSuffix } from '@common/constant/params-config';
 import { uuid } from '@common/utils/uuid';
+import { getImageUrlV2 } from '@common/utils/image';
 import { getInputFiles } from '@api/input-files';
 
 interface InputParamsValueProps {
@@ -307,6 +308,11 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
           dropdownMenuStyle={{
             maxHeight: dropdownMaxHeight,
           }}
+          dropdownMenuClassName={
+            nodeInfo?.paramType === ValueTypeEnum.IMAGE
+              ? 'input-param-value-image-dropdown'
+              : undefined
+          }
           suffixIcon={SuffixComp}
           onFocus={() => {
             setIsEditing(false);
@@ -339,7 +345,20 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
                     : v
                 }
               >
-                {option}
+                {nodeInfo?.paramType === ValueTypeEnum.IMAGE &&
+                RE_IMAGE_SUFFIX.test(v) ? (
+                  <span className="image-select-option">
+                    <img
+                      className="image-select-option-thumb"
+                      src={getImageUrlV2(v, 'input')}
+                      alt={v}
+                      loading="lazy"
+                    />
+                    <span className="image-select-option-label">{v}</span>
+                  </span>
+                ) : (
+                  option
+                )}
               </Select.Option>
             );
           })}
