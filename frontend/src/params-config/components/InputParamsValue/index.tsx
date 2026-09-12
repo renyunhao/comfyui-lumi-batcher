@@ -212,20 +212,36 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
       })
       .map((v) => String(v));
 
-    // 图片参数：合并 input 目录（含子目录）下的图片，列表名显示相对路径
-    if (nodeInfo?.paramType === ValueTypeEnum.IMAGE && inputImageFiles.length) {
-      const merged = [...base];
-      const existed = new Set(merged);
-      inputImageFiles.forEach((p) => {
-        if (!existed.has(p)) {
-          merged.push(p);
-          existed.add(p);
-        }
-      });
-      return merged.sort((a, b) => a.localeCompare(b));
+    if (nodeInfo?.paramType !== ValueTypeEnum.IMAGE) {
+      return base;
     }
 
-    return base;
+    // 自定义节点 widget 提供的是裸文件名（实际位于 input 子目录中），
+    // 按 input 根目录无法预览；若在 input 递归列表中按文件名唯一匹配，
+    // 转换为相对 input 的路径，显示、预览与选中值保持统一
+    const nameCount = new Map<string, number>();
+    const nameToPath = new Map<string, string>();
+    inputImageFiles.forEach((p) => {
+      const name = p.split('/').pop() || p;
+      nameCount.set(name, (nameCount.get(name) || 0) + 1);
+      nameToPath.set(name, p);
+    });
+    const converted = base.map((v) =>
+      !v.includes('/') && nameCount.get(v) === 1
+        ? (nameToPath.get(v) as string)
+        : v,
+    );
+
+    // 合并 input 目录（含子目录）下的图片相对路径，去重排序
+    const merged = [...converted];
+    const existed = new Set(merged);
+    inputImageFiles.forEach((p) => {
+      if (!existed.has(p)) {
+        merged.push(p);
+        existed.add(p);
+      }
+    });
+    return merged.sort((a, b) => a.localeCompare(b));
   }, [nodeInfo, inputImageFiles]);
 
   /** 弹出时按输入框到屏幕底部的可用空间自适应下拉列表高度 */
