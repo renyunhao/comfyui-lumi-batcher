@@ -1,12 +1,32 @@
 @import '@common/styles/base.scss';
 
+// 滚动条常显：覆盖 base.scss 中 hover 才显示 thumb、纵向宽度为 0 的 mac 风格行为
+@mixin scrollbar-always-visible {
+  &::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: hsla(0, 0%, 100%, 0.2);
+  }
+}
+
 .table {
   width: 100%;
   height: 100%;
   overflow: auto;
   @include scrollbar(8px, 0px);
+  @include scrollbar-always-visible;
 
   :global {
+    // 让表格严格以 scroll.x 指定的自然宽度渲染，
+    // 矩阵小于显示区域时不拉伸填满（保证滑块调节单元格尺寸生效），
+    // 超出显示区域时由 content-inner 产生横向滚动条
+    table {
+      min-width: 0 !important;
+    }
+
     .arco-table-th .arco-table-th-item {
       padding: 8px;
     }
@@ -15,10 +35,14 @@
       z-index: 4;
     }
 
+    // 横向滚动条由 content-inner 产生（overflow-x: auto），
+    // 默认浏览器滚动条会自动隐藏，这里一并纳入常显样式
+    .arco-table-content-inner,
     .arco-table-header,
     .arco-table-body {
       position: relative;
       @include scrollbar(8px, 0px);
+      @include scrollbar-always-visible;
 
       &::-webkit-scrollbar-track {
         border-left: 1px solid var(--color-border-3);

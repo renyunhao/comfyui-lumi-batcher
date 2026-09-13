@@ -18,6 +18,7 @@ export interface PreviewTableProps {
   columnList: ColumnProps<PreviewTableRowDataType>[];
   cellValue2UrlMap: any;
   renderRect: {
+    /** 显示区域高度（实时跟随容器变化） */
     height: number;
   };
 }
@@ -33,9 +34,11 @@ export const PreviewTable: React.FC<PreviewTableProps> = ({
   columnList,
   renderRect,
 }) => {
-  const columnNumber = useMemo(() => columnList.length, [columnList]);
   const tableContainerRef = useRef<TableInstance>(null);
   const [height, setHeight] = useState(0);
+  // 仅在数据或列结构变化时重挂载表格（序列化 key 方案），
+  // 避免每次渲染都重挂载导致表头高度观察器绑定到已脱离 DOM 的节点
+  const tableKey = useMemo(() => uuid(), [data, columnList]);
 
   useEffect(() => {
     usePreviewTableStore.setState({
@@ -118,35 +121,37 @@ export const PreviewTable: React.FC<PreviewTableProps> = ({
   );
 
   useEffect(() => {
-    const c = tableContainerRef.current;
-    if (!c) {
-      return;
-    }
-
-    const element = c
-      .getRootDomElement()
-      ?.querySelector('.arco-table-tr') as HTMLElement;
+    const element = tableContainerRef.current
+      ?.getRootDomElement()
+      ?.querySelector('.arco-table-tr') as HTMLElement | null;
 
     if (!element) {
       return;
     }
 
-    const observer = new MutationObserver(() => {
+    const syncHeight = () => {
       setHeight(element.offsetHeight);
-    });
+    };
 
-    observer.observe(element, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-    });
-
-    setHeight(element.offsetHeight);
+    // 表头行高度会随单元格尺寸变化，用 ResizeObserver 持续同步
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(element);
+    syncHeight();
 
     return () => {
       observer.disconnect();
     };
-  }, []);
+  }, [tableKey]);
+
+  // 矩阵自然宽度 = 各列声明宽度之和
+  const naturalWidth = useMemo(
+    () =>
+      columnList.reduce(
+        (sum, c) => sum + (typeof c.width === 'number' ? c.width : 0),
+        0,
+      ),
+    [columnList],
+  );
 
   const TableContent = useMemo(
     () => (
@@ -156,17 +161,14 @@ export const PreviewTable: React.FC<PreviewTableProps> = ({
         className={styles.table}
         rowKey="id"
         columns={columns}
-        key={uuid()} // 添加key强制重新渲染
+        key={tableKey}
         data={data}
-        style={{
-          width:
-            cellSize * columnNumber > window.innerWidth - 48
-              ? '100%'
-              : 'min-content',
-        }}
+        style={{ width: '100%' }}
         scroll={{
-          x: true,
-          y: renderRect.height - height - 2,
+          // 矩阵以各列声明宽度之和为自然宽度显示（保证滑块调节生效），
+          // 超出显示区域时由 content-inner 产生横向滚动条
+          x: naturalWidth || true,
+          y: Math.max(renderRect.height - height - 2, 100),
         }}
         border={{
           wrapper: true,
@@ -178,7 +180,14 @@ export const PreviewTable: React.FC<PreviewTableProps> = ({
         onRow={rowEventConfig}
       />
     ),
-    [cellSize, columnNumber, columns, data, height, renderRect.height],
+    [
+      tableKey,
+      columns,
+      data,
+      naturalWidth,
+      renderRect.height,
+      height,
+    ],
   );
 
   return TableContent;

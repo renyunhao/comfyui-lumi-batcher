@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -10,14 +10,17 @@ import { processColumns, processRows } from '../../util/process_filter';
 import styles from './index.module.scss';
 import { useColumns } from './use-columns';
 import { useData } from './use-data';
-import useResize from '@common/hooks/use-resize';
 import { customCompare } from '@common/components/PreviewTable/utils/compare';
 import { PreviewTable } from '@common/components/PreviewTable';
 import { memoryMap } from '@common/utils/advanced-map';
 import { orderColumns, orderRows } from './order';
 
 export const ResultPreviewTable = () => {
-  const height = useResize(() => window.innerHeight - 60 - 76);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // 显示区域高度，初始用视口估算值，挂载后由 ResizeObserver 实时校正
+  const [renderHeight, setRenderHeight] = useState(
+    () => window.innerHeight - 60 - 76,
+  );
   const [previewPercent, customColumns, customRows] = useResultViewStore(
     useShallow((s) => [s.previewPercent, s.customColumns, s.customRows]),
   );
@@ -25,6 +28,24 @@ export const ResultPreviewTable = () => {
   const data = useData();
   const columns = useColumns();
   const cellSize = calcPercentSize(300, 100, previewPercent);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+      const { height } = entry.contentRect;
+      setRenderHeight((prev) => (prev === height ? prev : height));
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     // 处理高级筛选中的行
@@ -94,15 +115,17 @@ export const ResultPreviewTable = () => {
   }, [finalColumns, finalData, data, columns]);
 
   return (
-    <div className={styles.content} style={{ height }}>
+    <div
+      ref={contentRef}
+      className={styles.content}
+      style={{ flex: 1, minHeight: 0, width: '100%', overflow: 'hidden' }}
+    >
       <PreviewTable
         data={finalData}
         cellSize={cellSize}
         columnList={finalColumns}
         cellValue2UrlMap={undefined}
-        renderRect={{
-          height,
-        }}
+        renderRect={{ height: renderHeight }}
       />
     </div>
   );
