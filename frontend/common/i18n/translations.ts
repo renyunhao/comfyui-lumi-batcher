@@ -152,6 +152,10 @@ export const TranslationsDataDefault: TranslationsType = {
     'en-US': 'Select all',
     'zh-CN': '全选',
   },
+  unselect_all: {
+    'en-US': 'Unselect all',
+    'zh-CN': '取消全选',
+  },
   clear_all: {
     'en-US': 'Clear all',
     'zh-CN': '清空',

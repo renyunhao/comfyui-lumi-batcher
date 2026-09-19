@@ -4,6 +4,7 @@ import type React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  Button,
   Input,
   type InputProps,
   Select,
@@ -20,6 +21,7 @@ import { UploadComponent } from './UploadComp';
 import type { Size } from './UploadPopover/shared';
 
 import './index.scss';
+import { I18n } from '@common/i18n';
 import {
   getNodeInfo,
   getNodeInfoKey,
@@ -257,6 +259,51 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     setDropdownMaxHeight(`${Math.max(available, 200)}px`);
   };
 
+  /** 选项值列表（与渲染 Option 时的 value 映射保持一致） */
+  const optionValueList = useMemo(() => {
+    const isSpecialOutput = String(nodeInfo?.paramValue)?.endsWith(
+      SpecialOutputSuffix,
+    );
+    return options.map((option) => {
+      const v = String(option || '');
+      return {
+        value: isSpecialOutput ? buildSpecialOutputValue(v) : v,
+        text: v,
+      };
+    });
+  }, [options, nodeInfo?.paramValue]);
+
+  /** 当前搜索词下可见的选项值（与 Arco 默认 filterOption 的匹配行为一致） */
+  const visibleOptionValues = useMemo(() => {
+    const search = String(inputValue || '').toLowerCase();
+    if (!search) {
+      return optionValueList.map((o) => o.value);
+    }
+    return optionValueList
+      .filter(
+        (o) =>
+          o.value.toLowerCase().includes(search) ||
+          o.text.toLowerCase().includes(search),
+      )
+      .map((o) => o.value);
+  }, [optionValueList, inputValue]);
+
+  const selectedValueList =
+    value instanceof Array ? value : value ? [value] : [];
+
+  /** 可见项是否已全部选中 */
+  const allVisibleSelected =
+    visibleOptionValues.length > 0 &&
+    visibleOptionValues.every((v) => selectedValueList.includes(v));
+
+  /** 全选/取消全选当前可见（搜索结果）的所有项 */
+  const handleToggleSelectAll = () => {
+    const next = allVisibleSelected
+      ? selectedValueList.filter((v) => !visibleOptionValues.includes(v))
+      : Array.from(new Set([...selectedValueList, ...visibleOptionValues]));
+    setValue(next);
+  };
+
   return (
     <div
       ref={rootRef}
@@ -323,8 +370,39 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
               ? rootRef.current || document.body
               : document.body
           }
+          dropdownRender={
+            enterFrom === 'batch-input'
+              ? (menu) => (
+                  <div className="input-param-value-select-dropdown">
+                    {menu}
+                    {visibleOptionValues.length > 0 && (
+                      <div className="select-dropdown-footer">
+                        <Button
+                          type="text"
+                          size="mini"
+                          // 阻止按钮抢走焦点，避免触发 onBlur 关闭下拉
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={handleToggleSelectAll}
+                        >
+                          {allVisibleSelected
+                            ? I18n.t('unselect_all', {}, '取消全选')
+                            : I18n.t('all_choose', {}, '全选')}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
+              : undefined
+          }
           dropdownMenuStyle={{
-            maxHeight: dropdownMaxHeight,
+            // 显示底栏时从列表最大高度中扣除底栏占位，保证弹窗总高不变，
+            // 避免 Trigger 自动上移遮挡输入框
+            maxHeight:
+              enterFrom === 'batch-input' &&
+              visibleOptionValues.length > 0 &&
+              dropdownMaxHeight
+                ? `calc(${dropdownMaxHeight} - 30px)`
+                : dropdownMaxHeight,
           }}
           dropdownMenuClassName={
             nodeInfo?.paramType === ValueTypeEnum.IMAGE

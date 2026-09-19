@@ -70,6 +70,18 @@
   }
 }
 
+/* 参数值下拉：底部全选操作栏（固定高度，与 dropdownMenuStyle 中扣除的 30px 对应） */
+.input-param-value-select-dropdown {
+  .select-dropdown-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 30px;
+    border-top: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
+  }
+}
+
 /* 图片参数下拉选项：缩略图预览（popup 可能挂载到 body，样式放在顶层） */
 .input-param-value-image-dropdown {
   .arco-select-option {
