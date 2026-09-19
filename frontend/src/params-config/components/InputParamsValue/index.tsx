@@ -277,6 +277,8 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
               handleChange(v);
             }
           }}
+          // 多选模式下点击选项后保留搜索词，支持在搜索结果中连续选择
+          showSearch={{ retainInputValueWhileSelect: true }}
           onInputValueChange={setInputValue}
           popupVisible={popupVisible}
           allowCreate={{
