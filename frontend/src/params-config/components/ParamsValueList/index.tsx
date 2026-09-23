@@ -32,6 +32,7 @@ import { LanguagesEnum, languageUtils, TranslateKeys } from '@common/language';
 import { formatSerialNumber } from '@common/utils/text';
 import { BrandName } from '@common/constant/batch';
 import { createWithPrefix } from '@common/utils/create-with-prefix';
+import { ValueTypeEnum } from '@common/utils/value-type';
 
 const withPrefix = createWithPrefix(BrandName);
 
@@ -75,6 +76,10 @@ export const ParamsValueList = () => {
       (nodeId ? currentNodeInfoMap[getNodeInfoKey(props as any)] : '') ||
       ({} as NodeInfo);
 
+    // 图片模式：预览元素放大到 3 倍（40 -> 120）
+    const isImageMode = nodeInfo?.paramType === ValueTypeEnum.IMAGE;
+    const previewSize = isImageMode ? 120 : 40;
+
     return (
       <div className={cn('params-values-edit-value')}>
         {editStatusMap[id] ? (
@@ -107,8 +112,8 @@ export const ParamsValueList = () => {
           <div className="params-values-preview-container">
             <ParamsValuePreview
               value={value}
-              height={32}
-              width={32}
+              height={previewSize}
+              width={previewSize}
               isError={
                 isShowValuesError
                   ? !validateValueType(value, nodeInfo.paramType)
@@ -215,7 +220,7 @@ export const ParamsValueList = () => {
     });
 
     return columns;
-  }, [currentParamsConfig, editStatusMap, isShowValuesError]);
+  }, [currentParamsConfig, editStatusMap, isShowValuesError, currentNodeInfoMap]);
 
   const currentData = useMemo(() => {
     const data: { [k in string]: string }[] = [];
