@@ -1,6 +1,8 @@
 .params-config-header {
   display: flex;
   align-items: center;
+  // 固定高度，供参数行吸顶时计算 top 偏移
+  height: 80px;
   padding: 24px 120px;
   box-sizing: border-box;
   overflow: hidden;

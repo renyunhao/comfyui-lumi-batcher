@@ -6,7 +6,7 @@ import { Message } from '@arco-design/web-react';
 
 import { I18n } from '@common/i18n';
 import { ParamsConfigType } from '@common/type/batch-task';
-import { cancelTask, deleteTask, TaskInfo } from '@api/batch-task';
+import { cancelTask, deleteTask, removeTask, TaskInfo } from '@api/batch-task';
 import { useContainerStore } from '@common/state/container';
 import { useResultViewStore } from '@src/result-view/store';
 import { useCreatorStore } from '@src/create-task/store';
@@ -26,6 +26,7 @@ export default function useHandler(task: TaskInfo) {
   const { copy: copyTask } = useCreatorStore();
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [removeLoading, setRemoveLoading] = useState(false);
 
   return useMemo(() => {
     const { id, name, status } = task;
@@ -99,11 +100,33 @@ export default function useHandler(task: TaskInfo) {
           });
         }
       },
-      remove() {
-        Message.error(I18n.t('pending', {}, '待处理'));
+      /**
+       * @description 清除任务：仅移除任务记录，不删除结果文件
+       */
+      async remove() {
+        try {
+          setRemoveLoading(true);
+          // 运行中/等待中的任务先取消，避免记录删除后队列仍在执行
+          if (
+            [TaskStatusEnum.Running, TaskStatusEnum.Waiting].includes(status)
+          ) {
+            await cancelTask(id);
+          }
+          await removeTask(id);
+          Message.success(
+            I18n.t('remove_task_successfully', {}, '清除任务成功'),
+          );
+        } catch (error) {
+          Message.error(
+            I18n.t('remove_task_failed', {}, '清除任务失败'),
+          );
+        } finally {
+          setRemoveLoading(false);
+        }
       },
       deleteLoading,
       cancelLoading,
+      removeLoading,
     };
-  }, [task, deleteLoading, cancelLoading]);
+  }, [task, deleteLoading, cancelLoading, removeLoading]);
 }

@@ -11,7 +11,7 @@ import { ParamsConfigHeader } from './components/Header';
 import './index.scss';
 
 export const ParamsConfigContainer = () => (
-  <Layout style={{ height: '100%' }}>
+  <Layout style={{ minHeight: '100%' }}>
     <Header>
       <ParamsConfigHeader />
     </Header>

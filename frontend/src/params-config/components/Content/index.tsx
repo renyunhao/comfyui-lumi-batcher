@@ -96,6 +96,9 @@ export const ParamsConfigContent = () => {
           ...currentParamsConfig,
         }}
         className="params-config-content-form"
+        // 不生成盒子，让内部 Row 直接成为滚动内容的子元素，
+        // 否则参数行 sticky 会被 Form 高度截断、无法在列表滚动时保持吸顶
+        style={{ display: 'contents' }}
         labelCol={{
           style: {
             width: 'fit-content',
@@ -136,7 +139,7 @@ export const ParamsConfigContent = () => {
             </RadioGroup>
           </Form.Item>
         </Row>
-        <Row gutter={24}>
+        <Row gutter={24} className="params-config-sticky-row">
           <Col span={12} className="params-config-form-item-wrapper">
             <Form.Item
               label={I18n.t('parameter_', {}, '参数：')}

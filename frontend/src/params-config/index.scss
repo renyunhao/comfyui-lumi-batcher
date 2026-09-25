@@ -17,6 +17,15 @@
     padding: 0;
     background-color: unset;
 
+    // 参数编辑界面顶部按钮行（完成/保存）吸顶，
+    // 滚动容器为 .arco-modal-content，参数很多向下滚动后无需滚回顶部即可点击
+    .arco-layout-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #000;
+    }
+
     .arco-modal-header {
       height: 60px;
       background: rgba(0, 0, 0, 0.12);

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 
 import {
   Button,
+  Popconfirm,
   Space,
   Table,
   type TableColumnProps,
@@ -258,6 +259,20 @@ export const ParamsValueList = () => {
     return currentParamsConfig.values.length > 0;
   }, [currentParamsConfig]);
 
+  /** 清空当前参数的所有参数值 */
+  const handleClearAllValues = () => {
+    if (type === 'group') {
+      updateCurrentConfig({
+        values: currentParamsConfig.values.map((item) => ({
+          ...item,
+          values: [],
+        })),
+      });
+    } else {
+      updateCurrentConfig({ values: [] });
+    }
+  };
+
   const TableContent = useMemo(() => {
     if (!showGuide) {
       return (
@@ -294,6 +309,25 @@ export const ParamsValueList = () => {
         <span className="title">
           {languageUtils.getText(TranslateKeys.PARAM_LIST)}
         </span>
+        {showGuide && (
+          <Popconfirm
+            title={I18n.t(
+              'are_you_sure_to_clear_all_parameter_values',
+              {},
+              '确认清空所有参数值吗？',
+            )}
+            onOk={handleClearAllValues}
+          >
+            <Button
+              type="outline"
+              status="danger"
+              size="mini"
+              icon={<IconDelete />}
+            >
+              {I18n.t('clear_all', {}, '清空')}
+            </Button>
+          </Popconfirm>
+        )}
       </div>
       {TableContent}
     </div>

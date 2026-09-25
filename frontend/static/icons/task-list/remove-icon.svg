@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="12" height="13" viewBox="0 0 24 24" fill="none">
+  <!-- 扫帚柄 -->
+  <path d="M12 2.5V9.5" stroke="white" stroke-opacity="0.85" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- 扫帚头 -->
+  <path d="M7.5 10H16.5L17.5 13H6.5L7.5 10Z" fill="white" fill-opacity="0.85"/>
+  <!-- 帚须 -->
+  <g stroke="white" stroke-opacity="0.85" stroke-width="1.6" stroke-linecap="round">
+    <path d="M6.8 13.5L5.6 21"/>
+    <path d="M10.2 13.5L9.8 21"/>
+    <path d="M13.8 13.5L14.2 21"/>
+    <path d="M17.2 13.5L18.4 21"/>
+  </g>
+</svg>

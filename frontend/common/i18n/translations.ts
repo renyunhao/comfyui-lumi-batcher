@@ -160,6 +160,14 @@ export const TranslationsDataDefault: TranslationsType = {
     'en-US': 'Clear all',
     'zh-CN': '清空',
   },
+  are_you_sure_to_clear_all_parameters: {
+    'en-US': 'Are you sure to clear all parameters?',
+    'zh-CN': '确认清除所有参数吗？',
+  },
+  are_you_sure_to_clear_all_parameter_values: {
+    'en-US': 'Are you sure to clear all parameter values?',
+    'zh-CN': '确认清空所有参数值吗？',
+  },
   no_search_results_yet__try_searching_for_other_content: {
     'en-US': 'No search results yet, try searching for other content',
     'zh-CN': '暂无搜索结果，试试搜索其他内容',
@@ -413,6 +421,23 @@ export const TranslationsDataDefault: TranslationsType = {
   delete_task_failed: {
     'en-US': 'Delete task failed',
     'zh-CN': '删除任务失败',
+  },
+  confirm_to_remove_the_task: {
+    'en-US':
+      'Removing the task only deletes the task record, the result files will be kept. Confirm removal?',
+    'zh-CN': '清除任务仅移除任务记录，结果文件会保留，确定清除吗？',
+  },
+  remove_task: {
+    'en-US': 'Remove task',
+    'zh-CN': '清除任务',
+  },
+  remove_task_successfully: {
+    'en-US': 'Task removed successfully',
+    'zh-CN': '清除任务成功',
+  },
+  remove_task_failed: {
+    'en-US': 'Remove task failed',
+    'zh-CN': '清除任务失败',
   },
   download: {
     'en-US': 'Download',

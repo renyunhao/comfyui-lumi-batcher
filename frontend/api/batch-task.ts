@@ -107,6 +107,16 @@ export async function deleteTask(id: string) {
   return res.data;
 }
 
+/**
+ * @description 清除任务（仅移除任务记录，不删除结果文件）
+ */
+export async function removeTask(id: string) {
+  const res = await requestClient.post<any>(`${apiPrefix}/batch-task/remove`, {
+    batch_task_id: id,
+  });
+  return res.data;
+}
+
 export const queuePrompt = async (
   number: number,
   output: any,

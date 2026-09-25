@@ -16,7 +16,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { ClearComponent } from './ClearComp';
 import { CustomTag } from './CustomTag';
 import { RandomSeed } from './RandomSeed';
-import { dataTransfer } from './share';
+import { dataTransfer, expandNumberRange, expandNumberRangeList } from './share';
 import { UploadComponent } from './UploadComp';
 import type { Size } from './UploadPopover/shared';
 
@@ -131,7 +131,15 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
       return;
     }
     if (lastValue instanceof Array) {
-      onChange(dataTransfer(lastValue, nodeInfo?.paramType));
+      onChange(
+        dataTransfer(
+          expandNumberRangeList(
+            lastValue.map((v) => String(v)),
+            nodeInfo?.paramType,
+          ),
+          nodeInfo?.paramType,
+        ),
+      );
       setValue('');
       return;
     }
@@ -141,9 +149,19 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     } else {
       if (lastValue) {
         if (/[;；]/.test(lastValue)) {
-          onChange(dataTransfer(lastValue.split(/[;；]/), nodeInfo?.paramType));
+          onChange(
+            dataTransfer(
+              expandNumberRangeList(lastValue.split(/[;；]/), nodeInfo?.paramType),
+              nodeInfo?.paramType,
+            ),
+          );
         } else {
-          onChange(dataTransfer(lastValue, nodeInfo?.paramType));
+          const range = expandNumberRange(lastValue, nodeInfo?.paramType);
+          if (range) {
+            onChange(dataTransfer(range, nodeInfo?.paramType));
+          } else {
+            onChange(dataTransfer(lastValue, nodeInfo?.paramType));
+          }
         }
       }
 

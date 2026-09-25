@@ -656,6 +656,25 @@ class BatchToolsHandler:
             except Exception as e:
                 return web.json_response(getErrorResponse(e, "删除任务失败"))
 
+        @server.PromptServer.instance.routes.post(getApiPath("/batch-task/remove"))
+        async def removeTask(request):
+            try:
+                resp_code = 200
+                json_data = await request.json()
+                # 解析请求参数
+                batch_task_id = json_data["batch_task_id"]
+
+                response = {"code": resp_code, "message": "清除任务成功", "data": True}
+
+                # 仅移除任务记录，保留结果文件、依赖资源与压缩包
+                self.batchTaskDao.delete(batch_task_id)
+                self.batchSubTaskDao.delete(batch_task_id)
+                self.resourcesDao.delete(batch_task_id)
+
+                return web.json_response(response)
+            except Exception as e:
+                return web.json_response(getErrorResponse(e, "清除任务失败"))
+
         @server.PromptServer.instance.routes.post(getApiPath("/resolve-file"))
         async def resolve_file(request):
             try:

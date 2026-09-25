@@ -1,9 +1,19 @@
 .params-config-content {
   padding: 0 120px;
-  height: 100%;
+  min-height: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+
+  // 参数选择 + 参数值输入行：吸顶在 header（80px）下方，
+  // 列表很长向下滚动时仍可快速修改参数
+  .params-config-sticky-row {
+    position: sticky;
+    top: 80px;
+    z-index: 9;
+    background: #000;
+    padding-top: 12px;
+  }
 
   .params-config-form-item-wrapper {
     .arco-row {

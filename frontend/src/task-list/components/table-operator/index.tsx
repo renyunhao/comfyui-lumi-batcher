@@ -9,6 +9,7 @@ import { ReactComponent as IconCancel } from '@static/icons/backward.svg';
 import { ReactComponent as IconCopy } from '@static/icons/copy.svg';
 import { ReactComponent as IconLayout } from '@static/icons/layout-alt.svg';
 import { ReactComponent as IconDelete } from '@static/icons/task-list/delete-icon.svg';
+import { ReactComponent as IconRemove } from '@static/icons/task-list/remove-icon.svg';
 
 import { TaskStatusEnum } from '../../constants';
 import useHandler from './use-handler';
@@ -108,6 +109,23 @@ export default function TableOperator({
           onClick={handler.copy}
         />
       ) : null}
+      <Popconfirm
+        title={I18n.t(
+          'confirm_to_remove_the_task',
+          {},
+          '清除任务仅移除任务记录，结果文件会保留，确定清除吗？',
+        )}
+        onOk={async () => {
+          await handler.remove();
+          refresh();
+        }}
+      >
+        <IconButtonTooltip
+          icon={<IconRemove />}
+          loading={handler.removeLoading}
+          tooltip={I18n.t('remove_task', {}, '清除任务')}
+        />
+      </Popconfirm>
       <Popconfirm
         title={I18n.t('confirm_to_delete_the_task', {}, '确认删除任务吗？')}
         onOk={async () => {

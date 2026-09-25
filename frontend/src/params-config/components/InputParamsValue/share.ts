@@ -41,6 +41,67 @@ export const dataTransferSingle = (
   return resValue;
 };
 
+/** 数字范围输入（如 1-100 / 100-1），匹配起止均为整数或小数 */
+const RE_NUMBER_RANGE = /^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$/;
+
+/**
+ * @description 数字类型参数值范围展开：如 "1-100" 展开为 1~100 共 100 个值
+ * @param raw 输入文本
+ * @param type 参数值类型
+ * @returns 展开后的数值数组；非数字类型或格式不匹配时返回 null
+ */
+export const expandNumberRange = (
+  raw: string,
+  type?: ValueTypeEnum,
+): number[] | null => {
+  if (
+    ![ValueTypeEnum.NUMBER, ValueTypeEnum.INT, ValueTypeEnum.FLOAT].includes(
+      type as ValueTypeEnum,
+    )
+  ) {
+    return null;
+  }
+  const match = RE_NUMBER_RANGE.exec(String(raw));
+  if (!match) {
+    return null;
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const step = end >= start ? 1 : -1;
+  const result: number[] = [];
+  // 1e-9 容差，避免浮点误差导致少生成最后一个值
+  for (
+    let v = start;
+    step > 0 ? v <= end + 1e-9 : v >= end - 1e-9;
+    v += step
+  ) {
+    result.push(Number(v.toFixed(6)));
+  }
+  return result;
+};
+
+/**
+ * @description 对以分号分隔的多段输入逐段做数字范围展开
+ * @param items 分段字符串数组
+ * @param type 参数值类型
+ * @returns 展开并展平后的值数组
+ */
+export const expandNumberRangeList = (
+  items: string[],
+  type?: ValueTypeEnum,
+): (string | number)[] => {
+  const result: (string | number)[] = [];
+  items.forEach((item) => {
+    const range = expandNumberRange(item, type);
+    if (range) {
+      result.push(...range);
+    } else {
+      result.push(item);
+    }
+  });
+  return result;
+};
+
 /**
  * @description 处理数据转化
  * @param value 数据值
