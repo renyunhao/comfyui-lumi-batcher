@@ -1,6 +1,10 @@
 # Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 # SPDX-License-Identifier: GPL-3.0-or-later
+import re
+
 from lumi_batcher_service.constant.task import Category
+
+MAGIC_EXPRESSION_RE = re.compile(r"%([^%]+)%")
 
 
 def parse_bool(value):
@@ -87,6 +91,76 @@ def updatePrompt(prompt, config_item, simpleConfig={}) -> dict[str, any]:
 
 def getSimpleConfigKey(nodeId, internal_name):
     return "#{}:{}".format(nodeId, internal_name)
+
+
+def _build_title_to_node_id(workflow: dict) -> dict:
+    """建立 节点标题/类型 -> prompt 节点 id(字符串) 的映射，用于解析 %标题.参数%"""
+    mapping = {}
+    for node in workflow.get("nodes", []) or []:
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        node_key = str(node_id)
+        title = node.get("title")
+        node_type = node.get("type")
+        if title:
+            mapping.setdefault(title, node_key)
+        if node_type:
+            mapping.setdefault(node_type, node_key)
+    return mapping
+
+
+def _resolve_magic_expression(template: str, prompt: dict, title_map: dict) -> str:
+    """将 template 中的 %节点标题.参数名% 替换为 prompt 中对应节点该参数的当前值。
+    无法解析的占位符保持原样，避免破坏非批量场景。"""
+
+    def replace(match):
+        ref = match.group(1)
+        if "." not in ref:
+            return match.group(0)
+        node_ref, param = ref.rsplit(".", 1)
+        node_key = title_map.get(node_ref)
+        if not node_key or node_key not in prompt:
+            return match.group(0)
+        inputs = prompt[node_key].get("inputs", {})
+        if param not in inputs:
+            return match.group(0)
+        value = inputs[param]
+        # 连线输入是 [源节点id, 槽位] 列表，无法取到具体值
+        if isinstance(value, list):
+            return match.group(0)
+        return str(value)
+
+    return MAGIC_EXPRESSION_RE.sub(replace, template)
+
+
+def apply_magic_expressions(prompt: dict, workflow: dict, original_prompt: dict) -> None:
+    """在子任务参数写入后，重新解析字符串参数中的 %节点标题.参数名% 魔法表达式。
+
+    官方前端在 graphToPrompt 时已用画布当前值把占位符冻结进 prompt，
+    因此这里从 workflow.widgets_values 取回原始模板，分别用画布值(original_prompt)
+    和子任务值(prompt)解析，再把发生变化的输入项更新为子任务值。"""
+    title_map = _build_title_to_node_id(workflow)
+    for node in workflow.get("nodes", []) or []:
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        node_key = str(node_id)
+        inputs = prompt.get(node_key, {}).get("inputs")
+        if not inputs:
+            continue
+        widgets_values = node.get("widgets_values") or []
+        for widget in widgets_values:
+            if not isinstance(widget, str) or "%" not in widget:
+                continue
+            canvas_value = _resolve_magic_expression(widget, original_prompt, title_map)
+            subtask_value = _resolve_magic_expression(widget, prompt, title_map)
+            if canvas_value == subtask_value:
+                continue
+            # 通过画布解析值定位被前端冻结的输入项，再写入子任务解析值
+            for name, current in inputs.items():
+                if isinstance(current, str) and current == canvas_value:
+                    inputs[name] = subtask_value
 
 
 def generateSimpleConfigDefault(params_config) -> dict[str, str]:

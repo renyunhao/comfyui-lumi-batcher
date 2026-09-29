@@ -50,6 +50,7 @@ from lumi_batcher_service.common.resolve_file import resolveFileManager
 from lumi_batcher_service.controller.task.update_prompt import (
     updatePrompt,
     generateSimpleConfigDefault,
+    apply_magic_expressions,
 )
 from lumi_batcher_service.controller.task.update_workflow import (
     update_workflow,
@@ -864,6 +865,9 @@ class BatchToolsHandler:
                 for config_item in paramsCombine:
                     updatePrompt(temp_prompt, config_item, ba_batch_tools_params_config)
                     update_workflow(temp_workflow, temp_prompt, config_item)
+
+                # 重新解析 %节点标题.参数名% 魔法表达式，使其跟随子任务参数值
+                apply_magic_expressions(temp_prompt, temp_workflow, prompt)
 
                 resultList.append(
                     {
