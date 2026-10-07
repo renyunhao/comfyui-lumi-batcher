@@ -12,6 +12,7 @@ import {
   getKey,
   getRenderCellType,
   getRenderCellValue,
+  SingleParamResultKey,
 } from './utils';
 import { PreviewTableDataType } from '@common/components/PreviewTable/type/table';
 import { ConfigOption, ConfigOptionSimple } from '@common/type/result';
@@ -21,17 +22,35 @@ import { processResult } from '@common/utils/transfer/task-result';
 const CustomParamsConfigFilters = 'custom_params_config_filters';
 
 export const useData = () => {
-  const [detail, tableConfigOptions, selectedConfigOptionIndex] =
+  const [detail, tableConfigOptions, selectedConfigOptionIndex, orientation] =
     useResultViewStore(
       useShallow((s) => [
         s.detail,
         s.tableConfigOptions,
         s.selectedConfigOptionIndex,
+        s.singleParamOrientation,
       ]),
     );
   const tableData = useMemo(() => {
     if (!detail || selectedConfigOptionIndex === undefined) {
       return [];
+    }
+    // 仅有一个参数且选择"以行展示"时，将参数值作为行、生成结果作为唯一列
+    if (tableConfigOptions.length === 1 && orientation === 'rows') {
+      const rows = processConfigToData(tableConfigOptions[0], detail);
+      const { resultMap, configMap } = processTasks(detail.results);
+      return rows.map((item) => {
+        const filters = (
+          (item[CustomParamsConfigFilters] ?? []) as any as Array<string>
+        ).filter((v) => v);
+        const key = Object.keys(configMap).find((k) =>
+          filters.every((f) => configMap[k].includes(f)),
+        );
+        if (key) {
+          (item as any)[SingleParamResultKey] = processResult(resultMap[key]);
+        }
+        return item;
+      }) as any;
     }
     let res: PreviewTableDataType = [];
     // 构建表格，填充批量参数配置涉及的行数据
@@ -97,7 +116,7 @@ export const useData = () => {
     res = processTasksToData(res, cases, detail);
 
     return res;
-  }, [detail, tableConfigOptions, selectedConfigOptionIndex]);
+  }, [detail, tableConfigOptions, selectedConfigOptionIndex, orientation]);
 
   return tableData;
 };
@@ -134,11 +153,18 @@ const processConfigToData = (
           const imageKey = getImageKey(v);
           const imageSrc = detail.resourcesMap[imageKey] ?? '';
           const t = getRenderCellType(imageKey);
-          return {
-            type: t,
-            value: [getRenderCellValue(t, v, imageSrc)],
-            label: t === 'audio' ? v : getKey(cc),
-          };
+          const cell: any[] = [
+            {
+              type: t,
+              value: [getRenderCellValue(t, v, imageSrc)],
+              label: t === 'audio' ? v : getKey(cc),
+            },
+          ];
+          // 图像参数值在单元格内附带显示文件名
+          if (t === 'image') {
+            cell.push({ type: 'string', value: [imageKey], label: '' });
+          }
+          return cell;
         }),
       } as any);
     }
@@ -151,16 +177,21 @@ const processConfigToData = (
       const imageSrc = detail.resourcesMap[imageKey] ?? '';
       const t = getRenderCellType(imageKey);
       const uniqueKey = getKey(c, value);
+      const cell: any[] = [
+        {
+          type: t,
+          value: [getRenderCellValue(t, v, imageSrc)],
+          label: t === 'audio' ? value : getKey(c),
+        },
+      ];
+      // 图像参数值在单元格内附带显示文件名
+      if (t === 'image') {
+        cell.push({ type: 'string', value: [imageKey], label: '' });
+      }
       res.push({
         id: uniqueKey,
         [CustomParamsConfigFilters]: [uniqueKey],
-        [key]: [
-          {
-            type: t,
-            value: [getRenderCellValue(t, v, imageSrc)],
-            label: t === 'audio' ? value : getKey(c),
-          },
-        ],
+        [key]: cell,
       } as any);
     });
   }

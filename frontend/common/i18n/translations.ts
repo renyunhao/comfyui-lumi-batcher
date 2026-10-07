@@ -301,6 +301,18 @@ export const TranslationsDataDefault: TranslationsType = {
     'en-US': 'Custom columns',
     'zh-CN': '自定义列',
   },
+  display_as_rows: {
+    'en-US': 'Display as rows',
+    'zh-CN': '以行展示',
+  },
+  display_as_columns: {
+    'en-US': 'Display as columns',
+    'zh-CN': '以列展示',
+  },
+  generated_results: {
+    'en-US': 'Generated results',
+    'zh-CN': '生成结果',
+  },
   parameter_copied_successfully: {
     'en-US': 'Parameter copied successfully',
     'zh-CN': '参数复制成功',

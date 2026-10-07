@@ -5,6 +5,7 @@ import { type ColumnProps } from '@arco-design/web-react/es/Table';
 import { useResultViewStore } from '../store';
 import { getTableConfigOptions } from '.';
 import { AdvancedFilterItem } from '@common/components/PreviewTable/components/AdvancedFilter/type';
+import { SingleParamResultKey } from '../components/result-preview-table/utils';
 import {
   PreviewTableRowDataType,
   PreviewTableDataType,
@@ -14,7 +15,7 @@ import { I18n } from '@common/i18n';
 export const processColumns = (
   columns: ColumnProps<PreviewTableRowDataType>[],
 ): Array<AdvancedFilterItem> => {
-  const { selectedConfigOptionIndex, tableConfigOptions } =
+  const { selectedConfigOptionIndex, tableConfigOptions, singleParamOrientation } =
     useResultViewStore.getState();
   if (
     !columns ||
@@ -23,6 +24,11 @@ export const processColumns = (
   ) {
     return [];
   }
+
+  // 单参数以行展示时，结果列 dataIndex 为固定 key，
+  // 分组项 id 必须与之一致，否则 orderColumns 排序冲突会覆盖参数列
+  const isTransposed =
+    tableConfigOptions.length === 1 && singleParamOrientation === 'rows';
 
   /** 表格配置可选项 */
   const configOptions = getTableConfigOptions(tableConfigOptions);
@@ -43,8 +49,10 @@ export const processColumns = (
       ],
     })),
     {
-      label: configOptions[selectedConfigOptionIndex]?.value,
-      id: configOptions[selectedConfigOptionIndex]?.value,
+      label: isTransposed
+        ? I18n.t('generated_results', {}, '生成结果')
+        : configOptions[selectedConfigOptionIndex]?.value,
+      id: isTransposed ? SingleParamResultKey : configOptions[selectedConfigOptionIndex]?.value,
       selected: true,
       expanded: true,
       options: valueColumns.map(

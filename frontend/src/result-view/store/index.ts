@@ -15,6 +15,8 @@ interface ResultViewStateType {
   tableConfigOptions: ConfigOption[];
   /** 以xx聚合的已选中项下标，已排除 tableConfigOptions 中的忽略项 */
   selectedConfigOptionIndex?: number;
+  /** 仅有一个参数时，参数值的展示方向：rows 作为行、columns 作为列 */
+  singleParamOrientation: 'rows' | 'columns';
   /** Slider 滑块改变预览图大小 */
   previewPercent: number;
   loading: boolean;
@@ -50,6 +52,7 @@ const defaultStore: Omit<
   taskId: '',
   name: '',
   tableConfigOptions: [],
+  singleParamOrientation: 'rows',
   previewPercent: 100,
   loading: true,
   customColumns: [],

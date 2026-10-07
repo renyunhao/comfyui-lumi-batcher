@@ -3,6 +3,7 @@
 import os
 import traceback
 import uuid
+import folder_paths
 from lumi_batcher_service.thread.task_scheduler_manager import ThreadTaskManager
 from lumi_batcher_service.common.file import (
     get_file_absolute_path,
@@ -78,17 +79,25 @@ class ResourceUpload:
 
         for value in values:
             try:
-                file_origin_path = f"input/{str(value)}"
-                filePath = os.path.join(os.getcwd(), file_origin_path)
-                if not os.path.exists(filePath):
-                    new_file_path = get_file_absolute_path(file_origin_path)
-                    if os.path.exists(new_file_path):
-                        filePath = new_file_path
-                    else:
-                        # 如果文件不存在，跳过
-                        continue
+                str_value = str(value)
+                # 绝对路径（如 LoadImageAtFolder 等任意目录节点的值）直接使用
+                if os.path.isabs(str_value):
+                    if os.path.isfile(str_value):
+                        result.append(str_value)
+                    continue
 
-                result.append(filePath)
+                # 相对路径优先按 ComfyUI 实际配置的 input 目录解析，
+                # 兼容 --input-directory 启动参数将 input 指向其他磁盘的场景；
+                # 找不到再回退到旧的 cwd/input 与工作区相对路径逻辑
+                candidates = [
+                    os.path.join(folder_paths.get_input_directory(), str_value),
+                    os.path.join(os.getcwd(), "input", str_value),
+                    get_file_absolute_path(f"input/{str_value}"),
+                ]
+                for filePath in candidates:
+                    if os.path.exists(filePath):
+                        result.append(filePath)
+                        break
             except Exception as e:
                 print(f"Exception in _parseSingleConfig: {e}")
                 traceback.print_exc()

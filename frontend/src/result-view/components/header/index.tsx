@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useMemo } from 'react';
 
-import { Divider } from '@arco-design/web-react';
+import { Divider, Radio } from '@arco-design/web-react';
 import { isNumber } from 'lodash';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -25,6 +25,7 @@ export default function Header() {
     name,
     tableConfigOptions,
     selectedConfigOptionIndex,
+    singleParamOrientation,
     customColumns,
     customRows,
     originColumns,
@@ -37,6 +38,7 @@ export default function Header() {
       s.name,
       s.tableConfigOptions,
       s.selectedConfigOptionIndex,
+      s.singleParamOrientation,
       s.customColumns,
       s.customRows,
       s.originColumns,
@@ -92,6 +94,25 @@ export default function Header() {
           }}
           shouldChangeConfirm={customColumnsChanged || customRowsChanged}
         />
+        {tableConfigOptions.length === 1 && (
+          <Radio.Group
+            type="button"
+            size="small"
+            value={singleParamOrientation}
+            onChange={(value) => {
+              setState({
+                singleParamOrientation: value,
+              });
+            }}
+          >
+            <Radio value="rows">
+              {I18n.t('display_as_rows', {}, '以行展示')}
+            </Radio>
+            <Radio value="columns">
+              {I18n.t('display_as_columns', {}, '以列展示')}
+            </Radio>
+          </Radio.Group>
+        )}
         <AdvancedFilter
           label={I18n.t('custom_rows', {}, '自定义行')}
           list={customRows}

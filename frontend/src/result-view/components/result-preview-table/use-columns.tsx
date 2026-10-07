@@ -14,6 +14,7 @@ import {
   getLabel,
   getRenderCellType,
   getRenderCellValue,
+  SingleParamResultKey,
 } from './utils';
 import { RenderCell } from '@common/components/PreviewTable/components/RenderCell';
 import {
@@ -21,6 +22,7 @@ import {
   PreviewTableCellValueType,
 } from '@common/components/PreviewTable/type/table';
 import { ConfigOption, ConfigOptionSimple } from '@common/type/result';
+import { I18n } from '@common/i18n';
 
 const findOrderIndex = (array: number[], num: number): number => {
   let left = 0;
@@ -44,12 +46,14 @@ export const useColumns = () => {
     tableConfigOptions,
     selectedConfigOptionIndex,
     previewPercent,
+    orientation,
   ] = useResultViewStore(
     useShallow((s) => [
       s.detail,
       s.tableConfigOptions,
       s.selectedConfigOptionIndex,
       s.previewPercent,
+      s.singleParamOrientation,
     ]),
   );
 
@@ -60,6 +64,94 @@ export const useColumns = () => {
     const weights: number[] = [];
 
     if (selectedConfigOptionIndex === undefined) {
+      return res;
+    }
+
+    // 仅有一个参数且选择"以行展示"时：参数值作为行，生成结果作为唯一列
+    if (tableConfigOptions.length === 1 && orientation === 'rows') {
+      const item = tableConfigOptions[0];
+      if (item.type === 'group') {
+        const c = item as {
+          type: string;
+          values: ConfigOptionSimple[];
+        };
+        const nodeKey = c.values.map((v) => getKey(v)).join(CommonSeparator);
+        const valueList: PreviewTableCellValueType = [
+          {
+            type: 'string',
+            value: [nodeKey],
+            label: '',
+          },
+        ];
+        res.push({
+          title: <RenderCell cell={valueList} />,
+          extra: {
+            valueList,
+            isParams: true,
+            label: nodeKey,
+          },
+          dataIndex: nodeKey,
+          fixed: 'left',
+          width: Math.min(cellSize, 300),
+          render(col: PreviewTableCellValueType, record) {
+            return (
+              <RenderCell
+                cell={col}
+                defaultText={(record.batchTaskName as any) || '-'}
+              />
+            );
+          },
+        });
+      } else {
+        const c = item as ConfigOptionSimple;
+        const nodeKey = getKey(c);
+        const valueList: PreviewTableCellValueType = [
+          {
+            type: 'string',
+            value: [nodeKey],
+            label: '',
+          },
+        ];
+        res.push({
+          title: <RenderCell cell={valueList} />,
+          extra: {
+            valueList,
+            isParams: true,
+            label: nodeKey,
+          },
+          dataIndex: nodeKey,
+          fixed: 'left',
+          width: Math.min(cellSize, 300),
+          render(col: PreviewTableCellValueType, record) {
+            return (
+              <RenderCell
+                cell={col}
+                defaultText={(record.batchTaskName as any) || '-'}
+              />
+            );
+          },
+        });
+      }
+      const resultValueList: PreviewTableCellValueType = [
+        {
+          type: 'string',
+          value: [I18n.t('generated_results', {}, '生成结果')],
+          label: '',
+        },
+      ];
+      res.push({
+        title: I18n.t('generated_results', {}, '生成结果'),
+        extra: {
+          valueList: resultValueList,
+          isParams: false,
+          label: SingleParamResultKey,
+        },
+        dataIndex: SingleParamResultKey,
+        width: cellSize,
+        render(col: PreviewTableCellValueType) {
+          return <RenderCell cell={col} />;
+        },
+      });
       return res;
     }
 
@@ -159,20 +251,27 @@ export const useColumns = () => {
             return getKey(cc, String(cc.values[i]));
           })
           .join(CommonSeparator);
-        const valueList: PreviewTableCellValueType = paramsTempArr.map(
-          (_, ind) => {
+        const valueList: PreviewTableCellValueType = paramsTempArr
+          .map((_, ind) => {
             const cc = c.values[ind];
             const v = String(cc.values[i]);
             const imageKey = getImageKey(v);
             const imageSrc = detail?.resourcesMap[imageKey] ?? '';
             const t = getRenderCellType(imageKey);
-            return {
-              type: t,
-              value: [getRenderCellValue(t, v, imageSrc) as string],
-              label: t === 'audio' ? v : getKey(cc),
-            };
-          },
-        );
+            const cell: PreviewTableCellValueType = [
+              {
+                type: t,
+                value: [getRenderCellValue(t, v, imageSrc) as string],
+                label: t === 'audio' ? v : getKey(cc),
+              },
+            ];
+            // 图像参数值在列头内附带显示文件名
+            if (t === 'image') {
+              cell.push({ type: 'string', value: [imageKey], label: '' });
+            }
+            return cell;
+          })
+          .flat();
         res.push({
           title: <RenderCell cell={valueList} />,
           extra: {
@@ -201,6 +300,10 @@ export const useColumns = () => {
             label: t === 'audio' ? v : getLabel(c),
           },
         ];
+        // 图像参数值在列头内附带显示文件名
+        if (t === 'image') {
+          valueList.push({ type: 'string', value: [imageKey], label: '' });
+        }
         const dataIndex = getKey(c, v);
         res.push({
           title: <RenderCell cell={valueList} />,
@@ -224,6 +327,7 @@ export const useColumns = () => {
     detail?.resourcesMap,
     selectedConfigOptionIndex,
     tableConfigOptions,
+    orientation,
   ]);
 
   return columns;

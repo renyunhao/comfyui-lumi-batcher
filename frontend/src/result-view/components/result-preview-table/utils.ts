@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { ConfigOptionSimple } from '@common/type/result';
+import { getImageUrlV2 } from '@common/utils/image';
 import {
   RE_AUDIO_SUFFIX,
   RE_IMAGE_SUFFIX,
@@ -9,6 +10,9 @@ import {
 
 // 通用参数配置分隔符
 export const CommonSeparator = '+';
+
+// 单参数以行展示时，生成结果所在列的固定 key
+export const SingleParamResultKey = '@result';
 
 // 从参数配置中获取key
 export const getKey = (c: ConfigOptionSimple, v = '') =>
@@ -39,9 +43,15 @@ export const getRenderCellValue = (
   o: string | number,
   rs: string,
 ) => {
-  if (['image', 'video', 'audio'].includes(t) && rs) {
-    return rs;
-  } else {
-    return o;
+  if (['image', 'video', 'audio'].includes(t)) {
+    if (rs) {
+      return rs;
+    }
+    // 资源库缺失该文件（如旧任务上传失败）时，回退按 input 相对路径预览，
+    // 与参数选择界面保持一致，避免缩略图无法显示
+    if (typeof o === 'string' && o && !o.includes(':')) {
+      return getImageUrlV2(o, 'input');
+    }
   }
+  return o;
 };
