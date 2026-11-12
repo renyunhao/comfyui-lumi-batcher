@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type React from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   Button,
@@ -11,14 +11,20 @@ import {
   Space,
   Typography,
 } from '@arco-design/web-react';
+import { IconFolder } from '@arco-design/web-react/icon';
 import { useShallow } from 'zustand/react/shallow';
 
 import { ClearComponent } from './ClearComp';
 import { CustomTag } from './CustomTag';
 import { RandomSeed } from './RandomSeed';
-import { dataTransfer, expandNumberRange, expandNumberRangeList } from './share';
+import {
+  dataTransfer,
+  expandNumberRange,
+  expandNumberRangeList,
+} from './share';
 import { UploadComponent } from './UploadComp';
 import type { Size } from './UploadPopover/shared';
+import { ImagePicker } from '../ImagePicker';
 
 import './index.scss';
 import { I18n } from '@common/i18n';
@@ -32,14 +38,13 @@ import { ParamsConfigTypeItem } from '@common/type/batch-task';
 import { useCreatorStore } from '@src/create-task/store';
 import {
   buildSpecialOutputValue,
-  RE_IMAGE_SUFFIX,
+  getSpecialOutputValue,
   RE_VIDEO_SUFFIX,
   ValueTypeEnum,
 } from '@common/utils/value-type';
 import { TemplateFileType } from '@common/constant/creator';
 import { SpecialOutputSuffix } from '@common/constant/params-config';
 import { uuid } from '@common/utils/uuid';
-import { getImageUrlV2 } from '@common/utils/image';
 import { getInputFiles } from '@api/input-files';
 
 interface InputParamsValueProps {
@@ -82,15 +87,19 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
   const [inputImageFiles, setInputImageFiles] = useState<string[]>([]);
   /** 下拉列表最大高度，弹出时按输入框到屏幕底部的距离自适应 */
   const [dropdownMaxHeight, setDropdownMaxHeight] = useState<string>();
+  const [pickerVisible, setPickerVisible] = useState(false);
+  // 弹窗挂载时焦点锁会触发输入框 blur，用 ref 同步判断，避免误提交
+  const pickerVisibleRef = useRef(false);
 
   const nodeInfo = currentParamConfig?.nodeId
     ? currentNodeInfoMap[getNodeInfoKey(currentParamConfig)]
     : ({} as NodeInfo);
 
+  const isImageParam = nodeInfo?.paramType === ValueTypeEnum.IMAGE;
+
   const matchSelector =
     nodeInfo?.paramOptions?.length > 0 ||
-    (nodeInfo?.paramType === ValueTypeEnum.IMAGE &&
-      inputImageFiles.length > 0);
+    (nodeInfo?.paramType === ValueTypeEnum.IMAGE && inputImageFiles.length > 0);
 
   useEffect(() => {
     if (!currentParamConfig.nodeId) {
@@ -151,7 +160,10 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
         if (/[;；]/.test(lastValue)) {
           onChange(
             dataTransfer(
-              expandNumberRangeList(lastValue.split(/[;；]/), nodeInfo?.paramType),
+              expandNumberRangeList(
+                lastValue.split(/[;；]/),
+                nodeInfo?.paramType,
+              ),
               nodeInfo?.paramType,
             ),
           );
@@ -175,6 +187,10 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
 
   const onBlur = () => {
     setPopupVisible(false);
+    // 打开图片选择器时焦点会被弹窗接管，此时不能提交并结束当前编辑
+    if (pickerVisibleRef.current) {
+      return;
+    }
     handleChange();
   };
 
@@ -188,6 +204,24 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     }
   }, []);
 
+  const closeImagePicker = useCallback(() => {
+    pickerVisibleRef.current = false;
+    setPickerVisible(false);
+  }, []);
+
+  const openImagePicker = useCallback(() => {
+    setPopupVisible(false);
+    pickerVisibleRef.current = true;
+    setPickerVisible(true);
+    getInputFiles('image')
+      .then((res) => {
+        setInputImageFiles(res?.data ?? []);
+      })
+      .catch((e) => {
+        console.error('获取 input 图片列表失败:', e);
+      });
+  }, []);
+
   const SuffixComp = useMemo(
     () => (
       <Space size="small" style={{ zIndex: 2 }}>
@@ -196,6 +230,19 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
             setValue('');
           }}
         />
+        {isImageParam && (
+          <span
+            className="input-param-value-suffix-browse"
+            title={I18n.t('browse_image_library', {}, '浏览图片库')}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              openImagePicker();
+            }}
+          >
+            <IconFolder />
+          </span>
+        )}
         <UploadComponent
           currentParamConfig={currentParamConfig}
           rootDomRef={rootRef}
@@ -215,54 +262,92 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
       setIsEditing,
       setValue,
       onChange,
+      isImageParam,
+      openImagePicker,
     ],
   );
 
-  // 增加类型过滤，图片、视频需要过滤候选值列表数据
+  // 图片参数改由全屏选择器挑选，下拉只保留手输/自定义值；
+  // 视频参数仍需按后缀过滤候选值列表
   const options = useMemo(() => {
-    const base = (nodeInfo?.paramOptions || [])
-      .filter((v) => {
-        if (nodeInfo.paramType === ValueTypeEnum.IMAGE) {
-          return RE_IMAGE_SUFFIX.test(String(v).toLowerCase());
-        } else if (nodeInfo.paramType === ValueTypeEnum.VIDEO) {
-          return RE_VIDEO_SUFFIX.test(String(v).toLowerCase());
-        } else {
-          return true;
-        }
-      })
+    if (nodeInfo?.paramType === ValueTypeEnum.IMAGE) {
+      return [];
+    }
+    return (nodeInfo?.paramOptions || [])
+      .filter((v) =>
+        nodeInfo?.paramType === ValueTypeEnum.VIDEO
+          ? RE_VIDEO_SUFFIX.test(String(v).toLowerCase())
+          : true,
+      )
       .map((v) => String(v));
+  }, [nodeInfo]);
 
-    if (nodeInfo?.paramType !== ValueTypeEnum.IMAGE) {
-      return base;
+  const currentValueList = useMemo(
+    () =>
+      (value instanceof Array ? value : value ? [value] : []).map((v) =>
+        String(v),
+      ),
+    [value],
+  );
+
+  /** 裸文件名若能唯一匹配到 input 子目录，统一成相对路径 */
+  const resolveInputImageFile = useCallback(
+    (raw: string) => {
+      const plain = getSpecialOutputValue(raw);
+      if (inputImageFiles.includes(plain)) {
+        return plain;
+      }
+      if (plain && !plain.includes('/')) {
+        const matches = inputImageFiles.filter(
+          (path) => (path.split('/').pop() || path) === plain,
+        );
+        if (matches.length === 1) {
+          return matches[0];
+        }
+      }
+      return '';
+    },
+    [inputImageFiles],
+  );
+
+  const pickerSelectedValues = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          currentValueList
+            .map((item) => resolveInputImageFile(item))
+            .filter(Boolean),
+        ),
+      ),
+    [currentValueList, resolveInputImageFile],
+  );
+
+  const handleImagePickerConfirm = (picked: string[]) => {
+    closeImagePicker();
+    if (!picked.length) {
+      return;
     }
 
-    // 自定义节点 widget 提供的是裸文件名（实际位于 input 子目录中），
-    // 按 input 根目录无法预览；若在 input 递归列表中按文件名唯一匹配，
-    // 转换为相对 input 的路径，显示、预览与选中值保持统一
-    const nameCount = new Map<string, number>();
-    const nameToPath = new Map<string, string>();
-    inputImageFiles.forEach((p) => {
-      const name = p.split('/').pop() || p;
-      nameCount.set(name, (nameCount.get(name) || 0) + 1);
-      nameToPath.set(name, p);
-    });
-    const converted = base.map((v) =>
-      !v.includes('/') && nameCount.get(v) === 1
-        ? (nameToPath.get(v) as string)
-        : v,
+    const isSpecialOutput = String(nodeInfo?.paramValue)?.endsWith(
+      SpecialOutputSuffix,
     );
+    const toValue = (file: string) =>
+      isSpecialOutput ? buildSpecialOutputValue(file) : file;
 
-    // 合并 input 目录（含子目录）下的图片相对路径，去重排序
-    const merged = [...converted];
-    const existed = new Set(merged);
-    inputImageFiles.forEach((p) => {
-      if (!existed.has(p)) {
-        merged.push(p);
-        existed.add(p);
-      }
-    });
-    return merged.sort((a, b) => a.localeCompare(b));
-  }, [nodeInfo, inputImageFiles]);
+    if (enterFrom === 'single-input') {
+      const next = toValue(picked[0]);
+      setValue(next);
+      handleChange(next);
+      return;
+    }
+
+    // 未在文件库中的值（特殊输出、手输值等）无法在图片选择器里取消，
+    // 合并时保留下来；文件库中的值以选择器勾选结果为准
+    const keep = currentValueList.filter(
+      (item) => !resolveInputImageFile(item),
+    );
+    handleChange(Array.from(new Set([...keep, ...picked.map(toValue)])));
+  };
 
   /** 弹出时按输入框到屏幕底部的可用空间自适应下拉列表高度 */
   const updateDropdownHeight = () => {
@@ -363,9 +448,10 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
               index={index}
               values={valueList}
               internal_name={currentParamConfig.internal_name ?? ''}
+              suffixWidth={isImageParam ? 78 : 54}
             />
           )}
-          renderFormat={(option, val) => {
+          renderFormat={(_, val) => {
             if (enterFrom === 'single-input') {
               return (
                 <Typography.Paragraph
@@ -422,10 +508,16 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
                 ? `calc(${dropdownMaxHeight} - 30px)`
                 : dropdownMaxHeight,
           }}
-          dropdownMenuClassName={
-            nodeInfo?.paramType === ValueTypeEnum.IMAGE
-              ? 'input-param-value-image-dropdown'
-              : undefined
+          notFoundContent={
+            isImageParam ? (
+              <div className="image-dropdown-browse-hint">
+                {I18n.t(
+                  'image_picker_dropdown_hint',
+                  {},
+                  '点击右侧文件夹图标浏览图片库，或直接输入值后回车',
+                )}
+              </div>
+            ) : undefined
           }
           suffixIcon={SuffixComp}
           onFocus={() => {
@@ -459,20 +551,7 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
                     : v
                 }
               >
-                {nodeInfo?.paramType === ValueTypeEnum.IMAGE &&
-                RE_IMAGE_SUFFIX.test(v) ? (
-                  <span className="image-select-option">
-                    <img
-                      className="image-select-option-thumb"
-                      src={getImageUrlV2(v, 'input')}
-                      alt={v}
-                      loading="lazy"
-                    />
-                    <span className="image-select-option-label">{v}</span>
-                  </span>
-                ) : (
-                  option
-                )}
+                {option}
               </Select.Option>
             );
           })}
@@ -518,6 +597,17 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
             />
           ) : null}
         </div>
+      )}
+
+      {isImageParam && (
+        <ImagePicker
+          visible={pickerVisible}
+          files={inputImageFiles}
+          value={pickerSelectedValues}
+          multiple={enterFrom === 'batch-input'}
+          onCancel={closeImagePicker}
+          onConfirm={handleImagePickerConfirm}
+        />
       )}
     </div>
   );

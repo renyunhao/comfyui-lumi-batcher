@@ -17,7 +17,8 @@ export const CustomTag: React.FC<{
   values: ObjectValueType[];
   internal_name: string;
   rootRef: React.RefObject<HTMLDivElement>;
-}> = ({ props, index, values, internal_name, rootRef }) => {
+  suffixWidth?: number;
+}> = ({ props, index, values, internal_name, rootRef, suffixWidth = 54 }) => {
   const { label, closable, onClose } = props;
 
   const tagCount = values.length;
@@ -31,8 +32,6 @@ export const CustomTag: React.FC<{
   useEffect(() => {
     updateRect();
   }, []);
-
-  const suffixWidth = 54;
 
   const tagInfo = useMemo(() => {
     if (!rect) {
@@ -55,7 +54,7 @@ export const CustomTag: React.FC<{
         width: 100,
       };
     }
-  }, [rect]);
+  }, [rect, suffixWidth]);
 
   const maxText = useMemo(() => {
     if (index > 0) {
@@ -78,7 +77,7 @@ export const CustomTag: React.FC<{
         {`${tagCount} ${internal_name} values selected`}
       </Typography.Paragraph>
     );
-  }, [rect, index, tagCount, internal_name]);
+  }, [rect, index, tagCount, internal_name, suffixWidth]);
 
   return (
     <>

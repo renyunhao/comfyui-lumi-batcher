@@ -470,4 +470,49 @@ export const TranslationsDataDefault: TranslationsType = {
         'The parameters have been successfully uploaded and parsed. The details are as follows:',
       'zh-CN': '参数已成功上传并解析，详情如下：',
     },
+  browse_image_library: {
+    'en-US': 'Browse image library',
+    'zh-CN': '浏览图片库',
+  },
+  image_picker_dropdown_hint: {
+    'en-US':
+      'Click the folder icon on the right to browse the library, or type a value and press Enter',
+    'zh-CN': '点击右侧文件夹图标浏览图片库，或直接输入值后回车',
+  },
+  image_picker_title: {
+    'en-US': 'Browse images',
+    'zh-CN': '浏览图片',
+  },
+  image_picker_search_placeholder: {
+    'en-US': 'Search file name or path…',
+    'zh-CN': '搜索文件名或路径…',
+  },
+  image_picker_root: {
+    'en-US': 'All (input)',
+    'zh-CN': '全部（input）',
+  },
+  image_picker_no_images: {
+    'en-US': 'No images here',
+    'zh-CN': '这里没有图片',
+  },
+  image_picker_no_match: {
+    'en-US': 'No matching images',
+    'zh-CN': '没有匹配的图片',
+  },
+  image_picker_selected_count: {
+    'en-US': '{n} selected',
+    'zh-CN': '已选 {n} 张',
+  },
+  image_picker_use_selected: {
+    'en-US': 'Use selected ({n})',
+    'zh-CN': '使用所选（{n}）',
+  },
+  image_picker_use_one: {
+    'en-US': 'Use this image',
+    'zh-CN': '使用该图片',
+  },
+  image_picker_preview_hint: {
+    'en-US': 'Select an image to preview it here',
+    'zh-CN': '选择图片后在这里预览',
+  },
 };
