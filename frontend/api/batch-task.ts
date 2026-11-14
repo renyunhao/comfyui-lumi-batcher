@@ -87,6 +87,43 @@ export async function getTaskList(
   return res.data;
 }
 
+export type UpdateBatchTaskRequest = CreateBatchTaskRequest & {
+  batch_task_id: string;
+};
+
+/** 保存准备状态任务的编辑内容（状态字段由后端保留） */
+export async function updateBatchTask(data: UpdateBatchTaskRequest) {
+  const res = await requestClient.post<any>(
+    `${apiPrefix}/batch-task/update`,
+    data,
+  );
+  return res.data;
+}
+
+/** 开始执行：只有准备状态的任务可以调用 */
+export async function startTask(id: string) {
+  const res = await requestClient.post<any>(`${apiPrefix}/batch-task/start`, {
+    batch_task_id: id,
+  });
+  return res.data;
+}
+
+/** 暂停：不打断当前执行项，等它跑完后停止后续执行 */
+export async function pauseTask(id: string) {
+  const res = await requestClient.post<any>(`${apiPrefix}/batch-task/pause`, {
+    batch_task_id: id,
+  });
+  return res.data;
+}
+
+/** 继续：从已暂停状态恢复剩余子任务 */
+export async function resumeTask(id: string) {
+  const res = await requestClient.post<any>(`${apiPrefix}/batch-task/resume`, {
+    batch_task_id: id,
+  });
+  return res.data;
+}
+
 /**
  * @description 取消任务
  */

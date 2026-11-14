@@ -6,6 +6,7 @@ import { TreeSelect } from '@arco-design/web-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import './index.scss';
+import { DROPDOWN_MAX_HEIGHT } from '@common/constant/params-config';
 import { useCreatorStore } from '@src/create-task/store';
 import { I18n } from '@common/i18n';
 import { languageUtils, TranslateKeys } from '@common/language';
@@ -15,7 +16,6 @@ import { uuid } from '@common/utils/uuid';
 const TreeNode = TreeSelect.Node;
 
 export const ParamsSelect = () => {
-  const [maxHeight, setMaxHeight] = useState(300);
   const [
     currentParamsConfig,
     paramsConfig,
@@ -33,11 +33,6 @@ export const ParamsSelect = () => {
   );
   const { type } = currentParamsConfig;
   const [treeValue, setTreeValue] = useState<string | string[]>('');
-
-  useEffect(() => {
-    const dom = document.querySelector('.params-config-modal-wrap');
-    dom?.clientHeight && setMaxHeight(Math.min(dom?.clientHeight - 250, 500));
-  }, []);
 
   useEffect(() => {
     const { nodeId, internal_name } = currentParamsConfig;
@@ -100,8 +95,9 @@ export const ParamsSelect = () => {
         className: 'params-select-container',
       }}
       dropdownMenuStyle={{
-        height: maxHeight,
-        maxHeight: 'unset',
+        // 与右侧参数值下拉共用同一个视口百分比基准（见 DROPDOWN_MAX_HEIGHT）。
+        // 用 maxHeight 而非 height，选项少时列表会自然收缩，不留大片空白。
+        maxHeight: DROPDOWN_MAX_HEIGHT,
       }}
       size="small"
       showSearch

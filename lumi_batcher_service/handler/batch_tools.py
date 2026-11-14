@@ -45,7 +45,11 @@ from lumi_batcher_service.common.error import getErrorResponse
 from lumi_batcher_service.common.file import (
     get_file_absolute_path,
 )
-from lumi_batcher_service.controller.task.cancel_queue import cancel_queue
+from lumi_batcher_service.controller.task.cancel_queue import (
+    cancel_queue,
+    deleteQueue,
+    getRunningQueue,
+)
 from lumi_batcher_service.common.resolve_file import resolveFileManager
 from lumi_batcher_service.controller.task.update_prompt import (
     updatePrompt,
@@ -70,6 +74,7 @@ class BatchToolsHandler:
     download_path = "download"
     db_path = "db"
     upload_path = "upload"
+    snapshot_path = "task_snapshots"
 
     batchTaskDao: BatchTaskDao
     batchSubTaskDao: BatchSubTaskDao
@@ -89,6 +94,8 @@ class BatchToolsHandler:
         self.workSpaceManager.addDirectory(self.download_path)
         # 添加上传文件夹，未来可以将上传的文件统一放到这里
         self.workSpaceManager.addDirectory(self.upload_path)
+        # 准备态任务的工作流 / 请求快照，避免大对象进入列表轮询的响应
+        self.workSpaceManager.addDirectory(self.snapshot_path)
 
         db_path = self.workSpaceManager.getFilePath(
             self.db_path, self.batch_tools_db_name
@@ -106,7 +113,10 @@ class BatchToolsHandler:
 
         self.resourceController = ResourceController(self)
 
-        # 当服务初始化时，我们认定房间触发了重启，更新子任务表中所有未完成的数据
+        # 重启恢复：先收敛「暂停请求中」的任务，让它们停在 paused 等待继续；
+        # 否则它们仍是 waiting/running，会被下面的逻辑判成失败而无法恢复
+        self.recover_pause_requested_tasks()
+        # 其余未完成任务按原有逻辑标记为房间重启导致失败
         self.batchSubTaskDao.update_on_reboot_room()
         self.batchTaskDao.update_on_reboot_room()
 
@@ -115,173 +125,297 @@ class BatchToolsHandler:
 
         @server.PromptServer.instance.routes.post(getApiPath("/batch-task/create"))
         async def createBatchTask(request):
+            """
+            提交任务：只创建并保存任务，进入「准备」状态。
+            不生成叉乘、不建立子任务、不向 ComfyUI 队列投递任何 prompt。
+            """
             try:
-                resp_code = 200
                 json_data = await request.json()
-                loop = asyncio.get_running_loop()
-                # 解析请求参数
                 params_config = json_data["params_config"]
                 prompt = json_data["prompt"]
                 workflow = json_data["workflow"]
-                client_id = json_data["client_id"]
-                auth_token_comfy_org = json_data["auth_token_comfy_org"]
-                api_key_comfy_org = json_data["api_key_comfy_org"]
+                task_name = json_data["task_name"]
 
                 number = None
                 if "number" in json_data:
                     number = float(json_data["number"])
-                task_name = json_data["task_name"]
 
-                # 计算任务叉乘后的任务数量
                 queue_count = self.getQueueCount(params_config)
-
-                statusCounts = StatusCounts()
-                packageInfo = PackageInfo()
-
-                errorMessages = []
-
-                # 生成唯一id，并写入文件
                 batch_task_id = str(uuid.uuid4())
 
-                # 2025.07.02 取消：处理SaveImage节点的配置
-                # save_image_config_list = getSaveImageConfig(prompt, batch_task_id)
-                # params_config = params_config + save_image_config_list
-
-                params_config_str = json.dumps(params_config)
-
-                # 处理叉乘
-                functionRes = await loop.run_in_executor(
-                    None, self.generateBatchParams, params_config, prompt, workflow
+                # 大对象存快照文件，extra 里只留完成钩子需要的轻量字段
+                self.save_task_snapshot(
+                    batch_task_id,
+                    self.build_snapshot(json_data, prompt, workflow, number),
                 )
-
-                final_response = {
-                    "code": resp_code,
-                    "message": "创建批量任务成功",
-                    "data": {"prompt_post_list": [], "cross_product": functionRes},
+                extra = {
+                    "output_nodes": process_output_nodes(prompt),
+                    "prompt": prompt,
+                    "pause_requested": False,
                 }
 
                 self.batchTaskDao.insert_task(
                     batch_task_id,
                     task_name,
                     queue_count,
-                    CommonTaskStatus.WAITING.value,
-                    params_config_str,
-                    statusCounts.to_json(),
-                    packageInfo.to_json(),
-                    json.dumps(errorMessages),
-                    json.dumps(
-                        {"output_nodes": process_output_nodes(prompt), "prompt": prompt}
-                    ),
+                    CommonTaskStatus.PREPARED.value,
+                    json.dumps(params_config),
+                    StatusCounts().to_json(),
+                    PackageInfo().to_json(),
+                    json.dumps([]),
+                    json.dumps(extra),
                 )
-
-                async def process_item(item):
-                    if "prompt" in item and "workflow" in item:
-                        queue_request_body = {
-                            "client_id": client_id,
-                            "prompt": item["prompt"],
-                            "extra_data": {
-                                "auth_token_comfy_org": auth_token_comfy_org,
-                                "api_key_comfy_org": api_key_comfy_org,
-                                "extra_pnginfo": {"workflow": item["workflow"]},
-                            },
-                        }
-
-                        params_config_str = json.dumps(
-                            item["workflow"].get("ba_batch_tools_prompt_combine", [])
-                        )
-
-                        if number == -1:
-                            queue_request_body["front"] = True
-                        elif number is not None:
-                            queue_request_body["number"] = number
-
-                        try:
-                            queue_response = await self.post_prompt(queue_request_body)
-
-                            final_response["data"]["prompt_post_list"].append(
-                                queue_response
-                            )
-
-                            prompt_id = queue_response.get(
-                                "prompt_id", str(uuid.uuid4())
-                            )
-                            error = queue_response.get(
-                                "error", "创建任务失败，请检查工作流！"
-                            )
-
-                            if "error" in queue_response:
-                                self.batchSubTaskDao.insert_task(
-                                    batch_task_id,
-                                    prompt_id,
-                                    params_config_str,
-                                    SubTaskStatus.FAILED.value,
-                                    json.dumps(error),
-                                    json.dumps([]),
-                                )
-                                # 更新创建失败数量
-                                statusCounts.create_failed = (
-                                    statusCounts.create_failed + 1
-                                )
-                                errorMessages.append(error)
-                            else:
-                                self.batchSubTaskDao.insert_task(
-                                    batch_task_id,
-                                    prompt_id,
-                                    params_config_str,
-                                    SubTaskStatus.PENDING.value,
-                                    json.dumps(error),
-                                    json.dumps([]),
-                                )
-
-                        except Exception as e:
-                            self.batchSubTaskDao.insert_task(
-                                batch_task_id,
-                                str(uuid.uuid4()),
-                                params_config_str,
-                                SubTaskStatus.FAILED.value,
-                                json.dumps("创建任务失败，请检查工作流！"),
-                                json.dumps([]),
-                            )
-                            # 更新创建失败数量
-                            statusCounts.create_failed = statusCounts.create_failed + 1
-                            final_response["data"]["prompt_post_list"].append(e)
-                            traceback.print_exc()
-
-                tasks = [process_item(item) for item in functionRes]
-
-                await asyncio.gather(*tasks)
-
-                if statusCounts.create_failed == queue_count:
-                    self.batchTaskDao.update_property(batch_task_id, "status", "failed")
-                    self.batchTaskDao.update_property(
-                        batch_task_id, "messages", json.dumps(errorMessages)
-                    )
-                elif statusCounts.create_failed > 0:
-                    self.batchTaskDao.update_property(
-                        batch_task_id, "status_counts", statusCounts.to_json()
-                    )
-
-                def dataUploadToRoom():
-                    try:
-                        self.resourceController.resourceUpload.createUploadTask(
-                            batch_task_id, params_config
-                        )
-                    except Exception as e:
-                        print(f"Exception in createFileUpload: {e}")
-                        traceback.print_exc()
-
-                RunInThread(dataUploadToRoom)
 
                 return web.json_response(
                     {
-                        "code": resp_code,
+                        "code": 200,
                         "message": "创建批量任务成功",
-                        "data": {"queue_count": queue_count},
+                        "data": {
+                            "batch_task_id": batch_task_id,
+                            "queue_count": queue_count,
+                            "status": CommonTaskStatus.PREPARED.value,
+                        },
                     }
                 )
             except Exception as e:
                 print("----create batch task error-----", e)
-                return web.json_response(getErrorResponse(e, "创建批量任务失败"))
+                traceback.print_exc()
+                return web.json_response(getErrorResponse(str(e), "创建批量任务失败"))
+
+        @server.PromptServer.instance.routes.post(getApiPath("/batch-task/update"))
+        async def updatePreparedTask(request):
+            """
+            准备态反复编辑：只覆盖名称 / 参数 / 数量 / 快照，
+            status、status_counts、package_info、messages 一律保留。
+            """
+            try:
+                json_data = await request.json()
+                batch_task_id = json_data["batch_task_id"]
+                task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                if task is None:
+                    return web.json_response(
+                        getErrorResponse("", "任务不存在")
+                    )
+                if task.get("status") != CommonTaskStatus.PREPARED.value:
+                    return web.json_response(
+                        getErrorResponse("", "只有准备状态的任务可以编辑")
+                    )
+
+                params_config = json_data["params_config"]
+                prompt = json_data["prompt"]
+                workflow = json_data["workflow"]
+                task_name = json_data["task_name"]
+                number = None
+                if "number" in json_data:
+                    number = float(json_data["number"])
+
+                queue_count = self.getQueueCount(params_config)
+                self.save_task_snapshot(
+                    batch_task_id,
+                    self.build_snapshot(json_data, prompt, workflow, number),
+                )
+
+                extra = json.loads(task.get("extra", "{}"))
+                extra["output_nodes"] = process_output_nodes(prompt)
+                extra["prompt"] = prompt
+                extra.setdefault("pause_requested", False)
+
+                res = self.batchTaskDao.update_task_content(
+                    batch_task_id,
+                    task_name,
+                    queue_count,
+                    json.dumps(params_config),
+                    json.dumps(extra),
+                )
+                if res is None:
+                    raise Exception("update task content failed")
+
+                return web.json_response(
+                    {
+                        "code": 200,
+                        "message": "保存任务成功",
+                        "data": {"queue_count": queue_count},
+                    }
+                )
+            except Exception as e:
+                return web.json_response(getErrorResponse(str(e), "保存任务失败"))
+
+        @server.PromptServer.instance.routes.post(getApiPath("/batch-task/start"))
+        async def startTask(request):
+            """准备 -> 执行：此刻才生成叉乘并投递到 ComfyUI 队列"""
+            try:
+                json_data = await request.json()
+                batch_task_id = json_data["batch_task_id"]
+                task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                if task is None:
+                    return web.json_response(getErrorResponse("", "任务不存在"))
+                if task.get("status") != CommonTaskStatus.PREPARED.value:
+                    return web.json_response(
+                        getErrorResponse("", "只有准备状态的任务可以开始")
+                    )
+
+                # 准备态理论上没有子任务，这里兜底清一次，避免重复开始产生脏数据
+                self.batchSubTaskDao.delete(batch_task_id)
+                count = await self.submit_batch(batch_task_id)
+
+                return web.json_response(
+                    {
+                        "code": 200,
+                        "message": "任务已开始",
+                        "data": {
+                            "queue_count": count,
+                            "status": CommonTaskStatus.WAITING.value,
+                        },
+                    }
+                )
+            except Exception as e:
+                return web.json_response(getErrorResponse(str(e), "开始任务失败"))
+
+        @server.PromptServer.instance.routes.post(getApiPath("/batch-task/pause"))
+        async def pauseTask(request):
+            """
+            暂停：不打断当前正在执行的子任务，只移除该任务剩余的排队项。
+            当前项执行结束后由 task_done 钩子把任务收敛为 paused。
+            """
+            try:
+                json_data = await request.json()
+                batch_task_id = json_data["batch_task_id"]
+                task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                if task is None:
+                    return web.json_response(getErrorResponse("", "任务不存在"))
+                if task.get("status") not in (
+                    CommonTaskStatus.WAITING.value,
+                    CommonTaskStatus.RUNNING.value,
+                ):
+                    return web.json_response(
+                        getErrorResponse("", "只有执行中的任务可以暂停")
+                    )
+
+                extra = json.loads(task.get("extra", "{}"))
+                extra["pause_requested"] = True
+                self.batchTaskDao.update_property(
+                    batch_task_id, "extra", json.dumps(extra)
+                )
+
+                unfinished = self.batchSubTaskDao.get_unfinished(batch_task_id)
+                unfinished_ids = [row["prompt_id"] for row in unfinished]
+                running = getRunningQueue()
+                # 只删排队项，绝不调用 interruptQueue / 不传当前 running
+                to_delete = [pid for pid in unfinished_ids if pid != running]
+                if to_delete:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, deleteQueue, to_delete)
+                self.batchSubTaskDao.mark_paused(batch_task_id, running or "")
+
+                if running and running in unfinished_ids:
+                    # 当前项继续跑完，完成钩子负责切成 paused
+                    status = task.get("status")
+                else:
+                    # 没有正在执行的项，直接停下
+                    status = CommonTaskStatus.PAUSED.value
+                    self.batchTaskDao.update_property(batch_task_id, "status", status)
+                    extra["pause_requested"] = False
+                    self.batchTaskDao.update_property(
+                        batch_task_id, "extra", json.dumps(extra)
+                    )
+
+                return web.json_response(
+                    {
+                        "code": 200,
+                        "message": "任务暂停中",
+                        "data": {"status": status},
+                    }
+                )
+            except Exception as e:
+                return web.json_response(getErrorResponse(str(e), "暂停任务失败"))
+
+        @server.PromptServer.instance.routes.post(getApiPath("/batch-task/resume"))
+        async def resumeTask(request):
+            """已暂停 -> 执行：按各子任务记录的参数组合重建 prompt 继续跑"""
+            try:
+                json_data = await request.json()
+                batch_task_id = json_data["batch_task_id"]
+                task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                if task is None:
+                    return web.json_response(getErrorResponse("", "任务不存在"))
+                if task.get("status") != CommonTaskStatus.PAUSED.value:
+                    return web.json_response(
+                        getErrorResponse("", "只有已暂停的任务可以继续")
+                    )
+
+                snapshot = self.load_task_snapshot(batch_task_id)
+                extra = json.loads(task.get("extra", "{}"))
+                prompt = snapshot.get("prompt") or extra.get("prompt", {})
+                workflow = snapshot.get("workflow", {})
+                number = snapshot.get("number", None)
+                params_config = json.loads(task.get("params_config", "[]"))
+                paused_subs = self.batchSubTaskDao.get_paused(batch_task_id)
+                status_counts = json.loads(task.get("status_counts", "{}"))
+                resumed = 0
+
+                for sub in paused_subs:
+                    try:
+                        params_combine = json.loads(sub.get("params_config", "[]"))
+                        item = self.build_batch_item(
+                            params_combine, params_config, prompt, workflow
+                        )
+                        queue_response = await self.post_prompt(
+                            self.build_queue_request(item, snapshot, number)
+                        )
+                        if "error" in queue_response:
+                            raise Exception(queue_response.get("error"))
+                        new_prompt_id = queue_response.get(
+                            "prompt_id", str(uuid.uuid4())
+                        )
+                        self.batchSubTaskDao.requeue(sub["id"], new_prompt_id)
+                        resumed += 1
+                    except Exception:
+                        # 重建失败的子任务直接记为失败，避免任务永远卡在排队中
+                        traceback.print_exc()
+                        self.batchSubTaskDao.update_property(
+                            sub["id"], "status", CommonTaskStatus.FAILED.value
+                        )
+                        failed_key = CommonTaskStatus.FAILED.value
+                        status_counts[failed_key] = (
+                            status_counts.get(failed_key, 0) + 1
+                        )
+
+                self.batchTaskDao.update_property(
+                    batch_task_id, "status_counts", json.dumps(status_counts)
+                )
+                extra["pause_requested"] = False
+                self.batchTaskDao.update_property(
+                    batch_task_id, "extra", json.dumps(extra)
+                )
+
+                if self.batchSubTaskDao.count_active(batch_task_id) == 0:
+                    # 没有可继续的子任务时，按累计计数直接收敛到终态
+                    queue_count = task.get("queue_count", 0)
+                    success = status_counts.get(
+                        CommonTaskStatus.SUCCESS.value, 0
+                    )
+                    if success == queue_count and queue_count > 0:
+                        status = CommonTaskStatus.SUCCESS.value
+                    elif success > 0:
+                        status = CommonTaskStatus.PARTIAL_SUCCESS.value
+                    else:
+                        status = CommonTaskStatus.FAILED.value
+                else:
+                    status = CommonTaskStatus.WAITING.value
+                self.batchTaskDao.update_property(batch_task_id, "status", status)
+
+                return web.json_response(
+                    {
+                        "code": 200,
+                        "message": "任务已继续",
+                        "data": {
+                            "resumed_count": resumed,
+                            "status": status,
+                        },
+                    }
+                )
+            except Exception as e:
+                return web.json_response(getErrorResponse(str(e), "继续任务失败"))
 
         @server.PromptServer.instance.routes.get(getApiPath("/batch-task/list"))
         async def getTaskList(request):
@@ -570,6 +704,16 @@ class BatchToolsHandler:
 
                 response = {"code": resp_code, "message": "取消任务成功", "data": True}
 
+                # 取消时同步清掉暂停标记，避免完成钩子在收尾时又判成暂停
+                current_task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                if current_task is not None:
+                    task_extra = json.loads(current_task.get("extra", "{}"))
+                    if task_extra.get("pause_requested"):
+                        task_extra["pause_requested"] = False
+                        self.batchTaskDao.update_property(
+                            batch_task_id, "extra", json.dumps(task_extra)
+                        )
+
                 self.batchSubTaskDao.execute_action(
                     SubTaskActionType.CANCEL, batch_task_id
                 )
@@ -648,6 +792,8 @@ class BatchToolsHandler:
                 )
                 # 清除批量任务
                 self.batchTaskDao.delete(batch_task_id)
+                # 清除准备态工作流快照
+                self.delete_task_snapshot(batch_task_id)
                 # 清除子任务
                 self.batchSubTaskDao.delete(batch_task_id)
                 # 清除批量任务涉及资源
@@ -671,6 +817,7 @@ class BatchToolsHandler:
                 self.batchTaskDao.delete(batch_task_id)
                 self.batchSubTaskDao.delete(batch_task_id)
                 self.resourcesDao.delete(batch_task_id)
+                self.delete_task_snapshot(batch_task_id)
 
                 return web.json_response(response)
             except Exception as e:
@@ -784,6 +931,218 @@ class BatchToolsHandler:
                 )
             except FileNotFoundError:
                 return web.Response(status=404, text="Service Worker file not found")
+
+    # ---------- 准备态 / 开始 / 暂停 状态机辅助 ----------
+
+    def recover_pause_requested_tasks(self):
+        """
+        启动时收敛「暂停请求中」的任务。
+
+        用户点了暂停但当前子任务还没跑完就关闭 ComfyUI 时，任务仍是
+        waiting/running 且带着 pause_requested 标记；若不处理，重启逻辑会
+        把它判成失败，用户就再也点不到「继续」。
+        """
+        tasks = self.batchTaskDao.get_pause_requested_unfinished()
+        for task in tasks:
+            task_id = task.get("id")
+            if not task_id:
+                continue
+            # 被中断的当前项也回到 paused，一并交给「继续」重建 prompt 重跑
+            self.batchSubTaskDao.pause_all_unfinished(task_id)
+            try:
+                extra = json.loads(task.get("extra") or "{}")
+            except (ValueError, TypeError):
+                extra = {}
+            extra["pause_requested"] = False
+            self.batchTaskDao.update_property(
+                task_id, "extra", json.dumps(extra)
+            )
+            self.batchTaskDao.update_property(
+                task_id, "status", CommonTaskStatus.PAUSED.value
+            )
+        if tasks:
+            print(f"recover {len(tasks)} paused task(s) after reboot")
+        return len(tasks)
+
+    @staticmethod
+    def build_snapshot(json_data, prompt, workflow, number):
+        """提交请求里需要延迟到「开始」时才用的大对象"""
+        return {
+            "workflow": workflow,
+            "prompt": prompt,
+            "client_id": json_data.get("client_id", ""),
+            "auth_token_comfy_org": json_data.get("auth_token_comfy_org", ""),
+            "api_key_comfy_org": json_data.get("api_key_comfy_org", ""),
+            "number": number,
+        }
+
+    def _snapshot_file(self, batch_task_id):
+        return self.workSpaceManager.getFilePath(
+            self.snapshot_path, f"{batch_task_id}.json"
+        )
+
+    def save_task_snapshot(self, batch_task_id, payload):
+        try:
+            with open(self._snapshot_file(batch_task_id), "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"save task snapshot failed: {e}")
+            return False
+
+    def load_task_snapshot(self, batch_task_id):
+        path = self._snapshot_file(batch_task_id)
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"load task snapshot failed: {e}")
+            return {}
+
+    def delete_task_snapshot(self, batch_task_id):
+        try:
+            path = self._snapshot_file(batch_task_id)
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            print(f"delete task snapshot failed: {e}")
+
+    @staticmethod
+    def build_queue_request(item, snapshot, number):
+        body = {
+            "client_id": snapshot.get("client_id", ""),
+            "prompt": item["prompt"],
+            "extra_data": {
+                "auth_token_comfy_org": snapshot.get("auth_token_comfy_org", ""),
+                "api_key_comfy_org": snapshot.get("api_key_comfy_org", ""),
+                "extra_pnginfo": {"workflow": item["workflow"]},
+            },
+        }
+        if number == -1:
+            body["front"] = True
+        elif number is not None:
+            body["number"] = number
+        return body
+
+    def build_batch_item(self, params_combine, params_config, prompt, workflow):
+        """按单个参数组合重建 prompt/workflow，暂停后继续执行时使用"""
+        temp_prompt = copy.deepcopy(prompt)
+        temp_workflow = copy.deepcopy(workflow)
+        simple_config = generateSimpleConfigDefault(params_config)
+        for config_item in params_combine:
+            updatePrompt(temp_prompt, config_item, simple_config)
+            update_workflow(temp_workflow, temp_prompt, config_item)
+        apply_magic_expressions(temp_prompt, temp_workflow, prompt)
+        return {
+            "prompt": temp_prompt,
+            "workflow": {
+                **temp_workflow,
+                "ba_batch_tools_prompt_combine": list(params_combine),
+                "ba_batch_tools_params_config": simple_config,
+            },
+        }
+
+    async def submit_batch(self, batch_task_id):
+        """把准备态任务的全部叉乘组合投递到 ComfyUI 队列"""
+        task = self.batchTaskDao.get_task_by_id(batch_task_id)
+        snapshot = self.load_task_snapshot(batch_task_id)
+        extra = json.loads(task.get("extra", "{}"))
+        params_config = json.loads(task.get("params_config", "[]"))
+        prompt = snapshot.get("prompt") or extra.get("prompt", {})
+        workflow = snapshot.get("workflow", {})
+        number = snapshot.get("number", None)
+
+        loop = asyncio.get_running_loop()
+        functionRes = await loop.run_in_executor(
+            None, self.generateBatchParams, params_config, prompt, workflow
+        )
+        if not functionRes:
+            # 没有可生成的组合时直接收敛为失败，避免永远停在排队中
+            self.batchTaskDao.update_property(
+                batch_task_id, "status", CommonTaskStatus.FAILED.value
+            )
+            self.batchTaskDao.update_property(
+                batch_task_id, "messages", json.dumps(["没有可生成的任务"])
+            )
+            return 0
+
+        statusCounts = StatusCounts()
+        errorMessages = []
+        queue_count = task.get("queue_count", len(functionRes))
+
+        async def process_item(item):
+            params_config_str = json.dumps(
+                item["workflow"].get("ba_batch_tools_prompt_combine", [])
+            )
+            try:
+                queue_response = await self.post_prompt(
+                    self.build_queue_request(item, snapshot, number)
+                )
+                prompt_id = queue_response.get("prompt_id", str(uuid.uuid4()))
+                error = queue_response.get("error", "创建任务失败，请检查工作流！")
+                if "error" in queue_response:
+                    self.batchSubTaskDao.insert_task(
+                        batch_task_id,
+                        prompt_id,
+                        params_config_str,
+                        SubTaskStatus.FAILED.value,
+                        json.dumps(error),
+                        json.dumps([]),
+                    )
+                    statusCounts.create_failed += 1
+                    errorMessages.append(error)
+                else:
+                    self.batchSubTaskDao.insert_task(
+                        batch_task_id,
+                        prompt_id,
+                        params_config_str,
+                        SubTaskStatus.PENDING.value,
+                        json.dumps(error),
+                        json.dumps([]),
+                    )
+            except Exception:
+                self.batchSubTaskDao.insert_task(
+                    batch_task_id,
+                    str(uuid.uuid4()),
+                    params_config_str,
+                    SubTaskStatus.FAILED.value,
+                    json.dumps("创建任务失败，请检查工作流！"),
+                    json.dumps([]),
+                )
+                statusCounts.create_failed += 1
+                traceback.print_exc()
+
+        await asyncio.gather(*[process_item(item) for item in functionRes])
+
+        if statusCounts.create_failed == queue_count and queue_count > 0:
+            self.batchTaskDao.update_property(
+                batch_task_id, "status", CommonTaskStatus.FAILED.value
+            )
+            self.batchTaskDao.update_property(
+                batch_task_id, "messages", json.dumps(errorMessages)
+            )
+        else:
+            self.batchTaskDao.update_property(
+                batch_task_id, "status", CommonTaskStatus.WAITING.value
+            )
+            if statusCounts.create_failed > 0:
+                self.batchTaskDao.update_property(
+                    batch_task_id, "status_counts", statusCounts.to_json()
+                )
+
+        def dataUploadToRoom():
+            try:
+                self.resourceController.resourceUpload.createUploadTask(
+                    batch_task_id, params_config
+                )
+            except Exception as e:
+                print(f"Exception in createFileUpload: {e}")
+                traceback.print_exc()
+
+        RunInThread(dataUploadToRoom)
+        return len(functionRes)
 
     def generateBatchParams(self, params_config, prompt, workflow):
         try:

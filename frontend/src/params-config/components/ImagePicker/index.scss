@@ -1,4 +1,7 @@
 .image-picker-modal {
+  // 避免主题样式给 Modal 加 max-width，把 90vw 又裁回去
+  max-width: none;
+
   .arco-modal-content {
     padding: 0;
   }
@@ -7,7 +10,9 @@
 .image-picker {
   display: flex;
   flex-direction: column;
-  height: min(620px, calc(100vh - 170px));
+  // 只扣掉弹窗 header / 上下留白占用的高度，其余全部按视口给内容区，
+  // 去掉原来的 620px 上限，让大屏也能铺满（弹窗整体约占视口 85%）
+  height: calc(90vh - 120px);
   min-height: 320px;
 }
 
@@ -25,7 +30,10 @@
 
 .image-picker-body {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) minmax(240px, 320px);
+  // 文件树与右侧大图预览也随屏幕宽度增长，中间网格占剩余空间
+  grid-template-columns:
+    clamp(190px, 13vw, 280px) minmax(0, 1fr)
+    clamp(260px, 26vw, 720px);
   flex: 1;
   min-height: 0;
 }
@@ -263,7 +271,7 @@
 
 @media (max-width: 900px) {
   .image-picker-body {
-    grid-template-columns: minmax(0, 1fr) 200px;
+    grid-template-columns: minmax(0, 1fr) clamp(200px, 30vw, 320px);
   }
 
   .image-picker-tree {

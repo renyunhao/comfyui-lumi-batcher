@@ -27,6 +27,7 @@ function validateParamsConfigItem(
 
 export async function validateWorkflowParamsConfig(
   taskParamsConfig: ParamsConfigType,
+  incompatibleMessage?: string,
 ) {
   // 输出节点和工作流联通性检测
   const flag = await createTaskCheck();
@@ -51,7 +52,7 @@ export async function validateWorkflowParamsConfig(
           validateParamsConfigItem(workflowParamsConfig, child),
         )
       ) {
-        validateFailedMessage();
+        validateFailedMessage(incompatibleMessage);
         return false;
       }
     } else {
@@ -60,7 +61,7 @@ export async function validateWorkflowParamsConfig(
       }
 
       if (!validateParamsConfigItem(workflowParamsConfig, item)) {
-        validateFailedMessage();
+        validateFailedMessage(incompatibleMessage);
         return false;
       }
     }
@@ -69,13 +70,15 @@ export async function validateWorkflowParamsConfig(
   return true;
 }
 
-const validateFailedMessage = () => {
+const validateFailedMessage = (message?: string) => {
   Message.error({
-    content: I18n.t(
-      'this_task_is_not_compatible_with_the_current_workflow_and_cannot_perform_a_copy_',
-      {},
-      '此任务与当前工作流不兼容，无法执行复制操作',
-    ),
+    content:
+      message ??
+      I18n.t(
+        'this_task_is_not_compatible_with_the_current_workflow_and_cannot_perform_a_copy_',
+        {},
+        '此任务与当前工作流不兼容，无法执行复制操作',
+      ),
     duration: 3000,
   });
 };

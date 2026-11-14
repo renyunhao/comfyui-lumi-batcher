@@ -43,7 +43,10 @@ import {
   ValueTypeEnum,
 } from '@common/utils/value-type';
 import { TemplateFileType } from '@common/constant/creator';
-import { SpecialOutputSuffix } from '@common/constant/params-config';
+import {
+  DROPDOWN_MAX_HEIGHT,
+  SpecialOutputSuffix,
+} from '@common/constant/params-config';
 import { uuid } from '@common/utils/uuid';
 import { getInputFiles } from '@api/input-files';
 
@@ -60,6 +63,8 @@ interface InputParamsValueProps {
   currentParamConfig: ParamsConfigTypeItem;
   enterFrom?: 'batch-input' | 'single-input';
   size?: InputProps['size'];
+  /** 失焦是否自动提交并结束编辑；卡片内联编辑传 false，由回车 / 取消按钮控制 */
+  commitOnBlur?: boolean;
 }
 
 export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
@@ -73,6 +78,7 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     currentParamConfig,
     size = 'large',
     enterFrom = 'batch-input',
+    commitOnBlur = true,
   } = props;
   const [currentNodeInfoMap, updateCurrentNodeInfoMap] = useCreatorStore(
     useShallow((s) => [s.currentNodeInfoMap, s.updateCurrentNodeInfoMap]),
@@ -85,8 +91,9 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
   const [isEditing, setIsEditing] = useState(false);
   /** input 目录（含子目录）下的图片相对路径列表 */
   const [inputImageFiles, setInputImageFiles] = useState<string[]>([]);
-  /** 下拉列表最大高度，弹出时按输入框到屏幕底部的距离自适应 */
-  const [dropdownMaxHeight, setDropdownMaxHeight] = useState<string>();
+  /** 下拉列表最大高度：以视口百分比为基准，弹出时再按输入框可用空间收窄 */
+  const [dropdownMaxHeight, setDropdownMaxHeight] =
+    useState<string>(DROPDOWN_MAX_HEIGHT);
   const [pickerVisible, setPickerVisible] = useState(false);
   // 弹窗挂载时焦点锁会触发输入框 blur，用 ref 同步判断，避免误提交
   const pickerVisibleRef = useRef(false);
@@ -101,18 +108,21 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     nodeInfo?.paramOptions?.length > 0 ||
     (nodeInfo?.paramType === ValueTypeEnum.IMAGE && inputImageFiles.length > 0);
 
+  // 只依赖真正影响节点信息的字段。调用方（参数卡片）每次渲染都会重建
+  // currentParamConfig 对象，若以整个对象为依赖，这里写回 store 会让父组件
+  // 重渲染、再次触发本 effect，形成无限更新并把弹窗整棵卸载
+  const { nodeId: configNodeId, internal_name: configInternalName } =
+    currentParamConfig;
+
   useEffect(() => {
-    if (!currentParamConfig.nodeId) {
+    if (!configNodeId) {
       return;
     }
 
-    const n = getNodeInfo(
-      currentParamConfig.nodeId,
-      currentParamConfig.internal_name,
-    );
+    const n = getNodeInfo(configNodeId, configInternalName);
 
     updateCurrentNodeInfoMap(n.key, n);
-  }, [currentParamConfig]);
+  }, [configNodeId, configInternalName, updateCurrentNodeInfoMap]);
 
   // 图片参数：拉取 input 目录（含子目录）下的图片，用于快速选择
   useEffect(() => {
@@ -191,7 +201,10 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     if (pickerVisibleRef.current) {
       return;
     }
-    handleChange();
+    // 卡片内联编辑时保持编辑态，避免点一下别处就「闪回」预览
+    if (commitOnBlur) {
+      handleChange();
+    }
   };
 
   const handlePlaceholderClick = () => {
@@ -349,17 +362,23 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     handleChange(Array.from(new Set([...keep, ...picked.map(toValue)])));
   };
 
-  /** 弹出时按输入框到屏幕底部的可用空间自适应下拉列表高度 */
+  /**
+   * 弹出时按输入框下方剩余空间收窄下拉高度。
+   * 主高度仍是视口百分比（与左侧参数选择下拉共用 DROPDOWN_MAX_HEIGHT），
+   * 这里只叠加一个上限：卡片内联编辑时输入框可能贴近屏幕底部，
+   * 纯百分比会让下拉溢出或触发自动翻转遮挡输入框。
+   * 上限写成 calc(100vh - 输入框底部偏移) 而非固定 px，窗口高度变化时
+   * 由浏览器自动重算，无需 resize 监听或重新渲染。
+   */
   const updateDropdownHeight = () => {
     const rect = rootRef.current?.getBoundingClientRect();
     if (!rect) {
       return;
     }
-    const margin = 16;
-    const spaceBelow = window.innerHeight - rect.bottom - margin;
-    const spaceAbove = rect.top - margin;
-    const available = Math.max(spaceBelow, spaceAbove);
-    setDropdownMaxHeight(`${Math.max(available, 200)}px`);
+    const offset = Math.round(rect.bottom + 16);
+    setDropdownMaxHeight(
+      `min(${DROPDOWN_MAX_HEIGHT}, max(200px, calc(100vh - ${offset}px)))`,
+    );
   };
 
   /** 选项值列表（与渲染 Option 时的 value 映射保持一致） */
@@ -502,9 +521,7 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
             // 显示底栏时从列表最大高度中扣除底栏占位，保证弹窗总高不变，
             // 避免 Trigger 自动上移遮挡输入框
             maxHeight:
-              enterFrom === 'batch-input' &&
-              visibleOptionValues.length > 0 &&
-              dropdownMaxHeight
+              enterFrom === 'batch-input' && visibleOptionValues.length > 0
                 ? `calc(${dropdownMaxHeight} - 30px)`
                 : dropdownMaxHeight,
           }}

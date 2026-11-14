@@ -129,13 +129,53 @@ def batch_tools_task_done_hook(batchToolsHandler: BatchToolsHandler):
                         current_status = batchTaskInfo.get("status")
                         output_nodes = extra.get("output_nodes", [])
                         prompt = extra.get("prompt", {})
-
-                        # 非终态状态下重新计算任务状态
-                        if current_status is not None and current_status not in [
+                        pause_requested = bool(extra.get("pause_requested", False))
+                        terminal_status = [
                             CommonTaskStatus.SUCCESS.value,
                             CommonTaskStatus.PARTIAL_SUCCESS.value,
                             CommonTaskStatus.CANCELLED.value,
-                        ]:
+                        ]
+
+                        # 暂停请求中：当前正在执行的子任务照常收尾并计数，
+                        # 但不判定为终态、也不打包；等它跑完再收敛为 paused
+                        handled_by_pause = False
+                        if (
+                            pause_requested
+                            and current_status is not None
+                            and current_status not in terminal_status
+                        ):
+                            handled_by_pause = True
+                            status_counts[status] = status_counts.get(status, 0) + 1
+                            batchToolsHandler.batchTaskDao.update_property(
+                                batch_task_id,
+                                "status_counts",
+                                json.dumps(status_counts),
+                            )
+                            remaining = (
+                                batchToolsHandler.batchSubTaskDao.count_active(
+                                    batch_task_id
+                                )
+                            )
+                            if remaining == 0:
+                                batch_task_status = CommonTaskStatus.PAUSED.value
+                                batchToolsHandler.batchTaskDao.update_property(
+                                    batch_task_id, "status", batch_task_status
+                                )
+                                extra["pause_requested"] = False
+                                batchToolsHandler.batchTaskDao.update_property(
+                                    batch_task_id, "extra", json.dumps(extra)
+                                )
+                            else:
+                                # 仍有子任务在跑，状态保持不变；这个值只用于
+                                # 让下面的打包判断不会被误触发
+                                batch_task_status = CommonTaskStatus.RUNNING.value
+
+                        # 非终态状态下重新计算任务状态
+                        if (
+                            not handled_by_pause
+                            and current_status is not None
+                            and current_status not in terminal_status
+                        ):
                             status_counts[status] = status_counts.get(status, 0) + 1
 
                             success_count = status_counts.get(

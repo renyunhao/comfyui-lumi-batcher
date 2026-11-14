@@ -229,6 +229,14 @@ export const languageConfigMap: Record<
     [LanguagesEnum.ZH]: '已失效',
     [LanguagesEnum.EN]: 'Dirty',
   },
+  [TranslateKeys.STATUS_PREPARED]: {
+    [LanguagesEnum.ZH]: '准备中',
+    [LanguagesEnum.EN]: 'Prepared',
+  },
+  [TranslateKeys.STATUS_PAUSED]: {
+    [LanguagesEnum.ZH]: '已暂停',
+    [LanguagesEnum.EN]: 'Paused',
+  },
 
   [TranslateKeys.RESET]: {
     [LanguagesEnum.ZH]: '重置',

@@ -3,7 +3,7 @@
 import { Message } from '@arco-design/web-react';
 
 import { useCreatorStore } from './store';
-import { createBatchTask } from '@api/batch-task';
+import { createBatchTask, updateBatchTask } from '@api/batch-task';
 import { languageUtils, TranslateKeys } from '@common/language';
 import { ParamsConfigType } from '@common/type/batch-task';
 import { uuid } from '@common/utils/uuid';
@@ -11,8 +11,8 @@ import { I18n } from '@common/i18n';
 import { getCurrentApiKey, getCurrentToken } from '@common/utils/auth';
 
 export const createBatchTaskFunc = async () => {
+  const { paramsConfig, taskName, editingTaskId } = useCreatorStore.getState();
   try {
-    const { paramsConfig, taskName } = useCreatorStore.getState();
     let output: any, workflow: any;
     if (window.app?.ue_modified_prompt) {
       const res = await window.app.ue_modified_prompt();
@@ -23,7 +23,7 @@ export const createBatchTaskFunc = async () => {
       workflow = output.workflow;
       output = output.output;
     }
-    await createBatchTask({
+    const payload = {
       client_id: sessionStorage.getItem('clientId') ?? '',
       prompt: output,
       workflow,
@@ -35,16 +35,41 @@ export const createBatchTaskFunc = async () => {
       task_name: taskName,
       params_config: paramsConfig,
       // number: 1,
-    });
-    console.log('创建批量任务成功');
-    Message.success(
-      I18n.t('create_batch_task_successfully', {}, '创建批量任务成功'),
-    );
+    };
+
+    if (editingTaskId) {
+      // 准备态反复编辑：更新原任务，后端会保留状态字段
+      await updateBatchTask({ ...payload, batch_task_id: editingTaskId });
+      Message.success(
+        I18n.t(
+          'save_prepared_task_successfully',
+          {},
+          '任务已保存，仍处于准备状态',
+        ),
+      );
+    } else {
+      // 提交只创建并保存，不自动开始执行，状态为「准备」
+      await createBatchTask(payload);
+      Message.success(
+        I18n.t(
+          'create_batch_task_successfully',
+          {},
+          '任务已创建，处于准备状态',
+        ),
+      );
+    }
   } catch (error) {
-    console.log('创建批量任务失败', error);
+    const defaultText = editingTaskId ? '保存任务失败' : '创建批量任务失败';
+    console.log(defaultText, error);
     Message.error(
-      I18n.t('failed_to_create_batch_task', {}, '创建批量任务失败'),
+      I18n.t(
+        editingTaskId ? 'failed_to_save_task' : 'failed_to_create_batch_task',
+        {},
+        defaultText,
+      ),
     );
+    // 抛出让调用方留在创建页，避免保存失败时 reset 掉尚未保存的编辑内容
+    throw error;
   }
 };
 

@@ -21,6 +21,8 @@ type ResetParamNames = ('taskName' | 'paramsConfig')[];
 
 interface StateType {
   taskName: string;
+  /** 正在编辑的准备态任务 id；null 表示新建任务 */
+  editingTaskId: string | null;
   /** 参数配置弹窗关闭方法 */
   // eslint-disable-next-line @typescript-eslint/ban-types
   closeParamsModal?: Function;
@@ -81,6 +83,7 @@ export const getDefaultStore = (): Omit<
 > => ({
   // taskName: languageUtils.getText(TranslateKeys.BATCH_TASK_TITLE),
   taskName: '',
+  editingTaskId: null,
   currentParamsConfig: {
     config_id: uuid(),
     type: 'data',
@@ -155,6 +158,8 @@ export const useCreatorStore = create<StateType>((set, get) => ({
     set({
       taskName: `${info.taskName}[copy]`,
       paramsConfig: info.paramsConfig?.filter((p) => p.category !== 'system'),
+      // 复制参数意味着新建任务，不能沿用上一次的编辑目标
+      editingTaskId: null,
     });
   },
   reset(names?: ResetParamNames) {

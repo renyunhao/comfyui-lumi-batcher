@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { type ReactNode, useMemo } from 'react';
 
-import { Button, Tag, Tooltip } from '@arco-design/web-react';
+import { Tag, Tooltip } from '@arco-design/web-react';
 import {
   IconCheckCircleFill,
   IconClockCircle,
@@ -10,6 +10,7 @@ import {
   IconExclamationCircleFill,
   IconInfoCircleFill,
   IconLoading,
+  IconPauseCircleFill,
 } from '@arco-design/web-react/icon';
 
 import { TaskStatusEnum } from '../../constants';
@@ -40,6 +41,22 @@ export default function TaskStatusTag(
     );
 
     switch (status) {
+      case TaskStatusEnum.Prepared:
+        tooltipContent = I18n.t(
+          'task_prepared_hint',
+          {},
+          '任务已保存，点击「开始」后才会执行',
+        );
+        icon = <IconClockCircle />;
+        break;
+      case TaskStatusEnum.Paused:
+        tooltipContent = I18n.t(
+          'task_paused_hint',
+          {},
+          '已停止后续执行，点击「继续」可恢复',
+        );
+        icon = <IconPauseCircleFill />;
+        break;
       case TaskStatusEnum.PartiallySucceeded:
         tooltipContent = `${I18n.t(
           'successful_{success};_failed__{placeholder3}',

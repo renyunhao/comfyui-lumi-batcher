@@ -1,8 +1,10 @@
 @import '@common/styles/base.scss';
 
 .comfyui-lumi-batcher-params-value-list {
-  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
+  padding: 16px 24px;
   background: var(---color-fill-1, rgba(255, 255, 255, 0.04));
   height: 100%;
   flex: 1;
@@ -13,9 +15,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
+    gap: 16px;
   }
 
   .title {
+    flex-shrink: 0;
     color: var(---color-text-2, rgba(255, 255, 255, 0.7));
 
     /* 14/CN-Regular */
@@ -25,6 +30,13 @@
     font-weight: 400;
     line-height: 22px; /* 157.143% */
   }
+
+  .params-values-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
   .img {
     display: block;
     width: 645px;
@@ -32,32 +44,163 @@
     margin-top: 92px;
   }
 
-  &-table {
-    margin-top: 16px;
-    border-collapse: collapse;
-
-    .arco-table-tr,
-    .arco-table-td {
-      height: 46px;
-      background-color: #0a0a0a;
-    }
-
-    .arco-table-body {
-      @include scrollbar();
-    }
-  }
-
-  .params-values-edit-value {
-    box-sizing: border-box;
-    display: grid;
+  // ---------- 缩略图尺寸滑块 ----------
+  .params-values-size-control {
+    display: flex;
     align-items: center;
-    // color: #ff453a;
+    gap: 8px;
+    color: var(--color-text-3, rgba(255, 255, 255, 0.5));
+
+    svg {
+      width: 14px;
+      height: 14px;
+    }
   }
 
-  .params-values-preview-container {
-    // display: flex;
-    // gap: 8px;
-    // align-items: center;
-    display: block;
+  .params-values-size-icon {
+    display: flex;
+    align-items: center;
+  }
+
+  .params-values-size-slider {
+    width: 120px;
+    margin: 0;
+  }
+
+  .params-values-size-value {
+    min-width: 40px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  // ---------- 横向卡片列表 ----------
+  .params-values-cards {
+    // 滑块只改这一个 CSS 变量，所有卡片尺寸同步变化，
+    // 参数列表完全不参与 React 重渲染
+    --params-thumb-size: 160px;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+    margin-top: 16px;
+    padding-bottom: 24px;
+    overflow: auto;
+    @include scrollbar();
+  }
+
+  .params-values-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    width: var(--params-thumb-size);
+    overflow: hidden;
+    border: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    background: var(--color-fill-2, #14141a);
+  }
+
+  // 编辑态给个明确的高亮，避免「点了没反应」的错觉
+  .params-values-card.is-editing {
+    border-color: rgb(var(--primary-6));
+    box-shadow: 0 0 0 1px rgb(var(--primary-6));
+  }
+
+  // 纯文本参数没有缩略图，用固定的易读宽度，不受尺寸滑块影响
+  .params-values-cards.is-text-only .params-values-card {
+    width: clamp(180px, 16vw, 260px);
+  }
+
+  .params-values-card-index {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 2;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: var(--color-text-2, rgba(255, 255, 255, 0.8));
+    font-size: 11px;
+    line-height: 18px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+
+  .params-values-card-edit {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    opacity: 0.8;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+
+  .params-values-card-item {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .params-values-card-label {
+    padding: 4px 8px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--color-text-3, rgba(255, 255, 255, 0.5));
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .params-values-card-stage {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    height: var(--params-thumb-size);
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.35);
+
+    > * {
+      max-width: 100%;
+    }
+
+    &.is-text {
+      height: auto;
+      min-height: 56px;
+      padding: 8px 10px;
+      background: transparent;
+
+      .arco-typography {
+        margin-bottom: 0;
+        word-break: break-all;
+      }
+    }
+
+    &.is-editing {
+      display: flex;
+      align-items: center;
+      padding: 8px;
+      background: transparent;
+
+      .input-param-value-wrapper {
+        flex: 1;
+        min-width: 0;
+        width: 100%;
+      }
+    }
+  }
+
+  // 删除按钮贴在预览图下方，宽度与预览图完全一致
+  .params-values-card-remove {
+    flex-shrink: 0;
+    width: 100%;
+    border-radius: 0;
+    border-top: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
   }
 }

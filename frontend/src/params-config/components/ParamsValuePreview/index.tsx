@@ -26,26 +26,37 @@ export const ParamsValuePreview: React.FC<{
   maxHeight = 'unset',
   isError = false,
 }) => {
-  const [type, setType] = useState(checkParamType(value));
+  /** 记住加载失败的是哪个值；值变了就恢复按真实类型预览 */
+  const [failedValue, setFailedValue] = useState<any>(() => Symbol('none'));
+  // 类型由当前 value 派生：卡片复用时编辑了值也能立刻切到正确的预览形态，
+  // 不能只在首次 mount 时算一次
+  const type = useMemo(
+    () => (failedValue === value ? 'text' : checkParamType(value)),
+    [failedValue, value],
+  );
 
   const Content = useMemo(() => {
     const url = getImageUrlV2(String(value), 'input', false);
+    const border = isError
+      ? '1px solid #ff453a'
+      : '1px solid var(--border-color-border-1, rgba(255, 255, 255, 0.12))';
+    const boxStyle = {
+      maxWidth,
+      maxHeight,
+      border,
+      borderRadius: 4,
+      boxSizing: 'border-box' as const,
+      ...{ width: width ?? undefined, height: height ?? undefined },
+    };
     if (type === 'image') {
       return (
         <Image
-          onError={() => {
-            setType('text');
-          }}
+          onError={() => setFailedValue(value)}
           className="param-value-preview-image"
           src={url}
-          style={{
-            maxWidth,
-            maxHeight,
-            border: isError
-              ? '1px solid #ff453a'
-              : '1px solid var(--border-color-border-1, rgba(255, 255, 255, 0.12))',
-            borderRadius: 4,
-          }}
+          // 卡片数量可能很多，交给浏览器按可视区域加载
+          loading="lazy"
+          style={boxStyle}
           {...{ width: width ?? undefined, height: height ?? undefined }}
         />
       );
@@ -53,17 +64,8 @@ export const ParamsValuePreview: React.FC<{
       return (
         <BlobVideo
           src={url}
-          style={{
-            maxWidth,
-            maxHeight,
-            border: isError
-              ? '1px solid #ff453a'
-              : '1px solid var(--border-color-border-1, rgba(255, 255, 255, 0.12))',
-            borderRadius: 4,
-            objectFit: 'cover',
-            marginTop: 8,
-            ...{ width: width ?? undefined, height: height ?? undefined },
-          }}
+          preload="none"
+          style={boxStyle}
           clickToFullScreen
           className="param-value-preview-video"
           hoverPlay
@@ -75,17 +77,8 @@ export const ParamsValuePreview: React.FC<{
         <AudioValuePreview
           audioProps={{
             src: url,
-            style: {
-              maxWidth,
-              maxHeight,
-              border: isError
-                ? '1px solid #ff453a'
-                : '1px solid var(--border-color-border-1, rgba(255, 255, 255, 0.12))',
-              borderRadius: 4,
-              objectFit: 'cover',
-              marginTop: 8,
-              ...{ width: width ?? undefined, height: height ?? undefined },
-            },
+            preload: 'none',
+            style: boxStyle,
             className: 'param-value-preview-audio',
           }}
           wrapperStyle={{

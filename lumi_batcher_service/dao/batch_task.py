@@ -196,6 +196,10 @@ class BatchTaskDao:
                     sql = read_sql_file(
                         os.path.join(self.sql_dir, "update_messages.sql")
                     )
+                elif property_name == "extra":
+                    sql = read_sql_file(
+                        os.path.join(self.sql_dir, "update_extra.sql")
+                    )
                 else:
                     raise Exception("Invalid property name")
 
@@ -206,6 +210,60 @@ class BatchTaskDao:
                 return cursor.lastrowid
         except sqlite3.Error as e:
             print(f"An error occurred on update task property: {e.args[0]}")
+
+    def update_task_content(
+        self,
+        task_id: str,
+        name: str,
+        queue_count: int,
+        params_config: str,
+        extra: str,
+    ):
+        """准备态编辑保存：只写内容字段，状态字段全部保留"""
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "update_content.sql"))
+                cursor.execute(
+                    sql,
+                    (
+                        name,
+                        queue_count,
+                        params_config,
+                        extra,
+                        int(time.time()) * 1000,
+                        task_id,
+                    ),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            print(f"An error occurred on update task content: {e.args[0]}")
+            return None
+
+    def get_pause_requested_unfinished(self):
+        """取出点了暂停、还没等当前项跑完就关掉 ComfyUI 的任务"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                sql = read_sql_file(
+                    os.path.join(self.sql_dir, "get_un_finish_list.sql")
+                )
+                cursor.execute(sql)
+                result = []
+                for row in cursor.fetchall():
+                    item = dict(row)
+                    try:
+                        extra = json.loads(item.get("extra") or "{}")
+                    except (ValueError, TypeError):
+                        continue
+                    if extra.get("pause_requested"):
+                        result.append(item)
+                return result
+            except sqlite3.Error as e:
+                print(f"An error occurred on get pause requested tasks: {e.args[0]}")
+                return []
 
     def update_on_reboot_room(self):
         with sqlite3.connect(self.db_file) as conn:

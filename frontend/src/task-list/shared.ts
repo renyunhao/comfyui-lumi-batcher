@@ -9,6 +9,16 @@ import { I18n } from '@common/i18n';
 
 /** 批量任务状态展示配置map */
 export const TaskStatusDisplay = {
+  [TaskStatusEnum.Prepared]: {
+    name: languageUtils.getText(TranslateKeys.STATUS_PREPARED),
+    color: 'var(--text-color-text-1, rgba(255, 255, 255, 0.85))',
+    background: 'var(--fills-color-fill-2, rgba(255, 255, 255, 0.08))',
+  },
+  [TaskStatusEnum.Paused]: {
+    name: languageUtils.getText(TranslateKeys.STATUS_PAUSED),
+    color: 'var(--tag-tagtext-orange-warning, #FF9F0A)',
+    background: 'var(--tag-tagbg-orange, rgba(255, 159, 10, 0.15))',
+  },
   [TaskStatusEnum.Waiting]: {
     name: languageUtils.getText(TranslateKeys.STATUS_WAITING),
     color: 'var(--text-color-text-1, rgba(255, 255, 255, 0.85))',

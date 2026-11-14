@@ -6,6 +6,7 @@ import { TreeSelect } from '@arco-design/web-react';
 import { useShallow } from 'zustand/react/shallow';
 
 import './index.scss';
+import { DROPDOWN_MAX_HEIGHT } from '@common/constant/params-config';
 import { useCreatorStore } from '@src/create-task/store';
 import { I18n } from '@common/i18n';
 import { languageUtils, TranslateKeys } from '@common/language';
@@ -24,7 +25,6 @@ export const NodesSelect = (props: {
   defaultValue?: string;
 }) => {
   const { addBefore, defaultValue, onSelect, nodesSelectSharedMap } = props;
-  const [maxHeight, setMaxHeight] = useState(300);
   const [
     currentParamsConfig,
     paramsConfig,
@@ -41,11 +41,6 @@ export const NodesSelect = (props: {
 
   const { type } = currentParamsConfig;
   const [treeValue, setTreeValue] = useState<string | string[]>('');
-  // 设置树形组件的最大高度
-  useEffect(() => {
-    const dom = document.querySelector('.params-config-modal-wrap');
-    dom?.clientHeight && setMaxHeight(Math.min(dom?.clientHeight - 250, 500));
-  }, []);
 
   // 设置树形组件的值
   useEffect(() => {
@@ -131,8 +126,9 @@ export const NodesSelect = (props: {
         className: 'params-select-container',
       }}
       dropdownMenuStyle={{
-        height: maxHeight,
-        maxHeight: 'unset',
+        // 与 ParamsSelect / InputParamsValue 共用同一个视口百分比基准，
+        // 不再依赖 .params-config-modal-wrap 是否存在，也不会被 500px 上限卡死。
+        maxHeight: DROPDOWN_MAX_HEIGHT,
       }}
       showSearch
       filterTreeNode={(inputText, node) =>

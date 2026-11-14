@@ -1,15 +1,10 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
-import {
-  Button,
-  Popconfirm,
-  Space,
-  Table,
-  type TableColumnProps,
-} from '@arco-design/web-react';
-import { IconDelete, IconEdit } from '@arco-design/web-react/icon';
+import { Button, Popconfirm, Tooltip } from '@arco-design/web-react';
+import { IconClose, IconDelete, IconEdit } from '@arco-design/web-react/icon';
 import cn from 'classnames';
 import _ from 'lodash';
 import { useShallow } from 'zustand/react/shallow';
@@ -19,23 +14,48 @@ import valuesEmptyGuideEn from '../../../../static/img/values-empty-guide-en.png
 
 import { InputParamsValue } from '../InputParamsValue';
 import { ParamsValuePreview } from '../ParamsValuePreview';
+import { readThumbSize, ThumbnailSizeSlider } from './ThumbnailSizeSlider';
 
 import './index.scss';
 import { useCreatorStore } from '@src/create-task/store';
 import {
-  getNodeInfoKey,
   NodeInfo,
   validateValueType,
 } from '@src/create-task/utils/get-node-info';
+import { checkParamType } from '../../utils/check-task-param-type';
+import type { ValueType } from '../../utils/check-task-param-type';
 import { I18n } from '@common/i18n';
-import { uuid } from '@common/utils/uuid';
 import { LanguagesEnum, languageUtils, TranslateKeys } from '@common/language';
 import { formatSerialNumber } from '@common/utils/text';
 import { BrandName } from '@common/constant/batch';
 import { createWithPrefix } from '@common/utils/create-with-prefix';
-import { ValueTypeEnum } from '@common/utils/value-type';
 
 const withPrefix = createWithPrefix(BrandName);
+
+/** 只有这些类型有缩略图可看，滑块也只在它们出现时才有意义 */
+const PREVIEWABLE_TYPES: ValueType[] = ['image', 'video', 'audio'];
+
+interface ValueItem {
+  /** 稳定 key：编辑态依赖它，不能像原来那样每次重算 uuid */
+  key: string;
+  value: string;
+  configId: string;
+  internalName: string;
+  nodeId?: string | number;
+  /** 当前值在参数值数组中的下标 */
+  index: number;
+  /** group 模式下所属子参数下标，单参数为 -1 */
+  subIndex: number;
+  previewType: ValueType;
+  /** 内联编辑配置：随 rows 一起缓存，保证传给输入框的对象引用稳定 */
+  editConfig: any;
+}
+
+interface ValueRow {
+  id: string;
+  index: number;
+  items: ValueItem[];
+}
 
 export const ParamsValueList = () => {
   const [
@@ -55,212 +75,139 @@ export const ParamsValueList = () => {
   const [editStatusMap, setEditStatusMap] = useState<Record<string, boolean>>(
     {},
   );
+  const cardsRef = useRef<HTMLDivElement>(null);
+  // 只在挂载时读取一次，之后尺寸完全由滑块自己维护
+  const initialThumbSize = useMemo(() => readThumbSize(), []);
 
   const { type } = currentParamsConfig;
 
-  const updateEditStatus = (config_id: string, status: boolean) => {
-    setEditStatusMap((data) => ({
-      ...data,
-      [config_id]: status,
-    }));
+  /** 把 group / 单参数两种数据形状收敛成统一的「一行 = 一张横向卡片」 */
+  const rows = useMemo<ValueRow[]>(() => {
+    const result: ValueRow[] = [];
+    if (type === 'group') {
+      const subConfigs = currentParamsConfig.values ?? [];
+      const count = Math.max(
+        0,
+        ...subConfigs.map((config) => config.values?.length ?? 0),
+      );
+      for (let index = 0; index < count; index += 1) {
+        result.push({
+          id: `row-${index}`,
+          index,
+          items: subConfigs.map((config, subIndex) => {
+            const value = config.values?.[index];
+            const key = `${index}-${config.config_id}`;
+            const text = String(value ?? '');
+            return {
+              key,
+              value: text,
+              configId: config.config_id,
+              internalName: config.internal_name ?? '',
+              nodeId: config.nodeId,
+              index,
+              subIndex,
+              previewType: checkParamType(value),
+              editConfig: {
+                ...currentParamsConfig,
+                id: key,
+                config_id: config.config_id,
+                nodeId: config.nodeId,
+                internal_name: config.internal_name,
+                index,
+                value: text,
+              },
+            };
+          }),
+        });
+      }
+    } else {
+      const config = currentParamsConfig;
+      config.values?.forEach((value, index) => {
+        const key = `${index}-${config.config_id}`;
+        const text = String(value ?? '');
+        result.push({
+          id: `row-${index}`,
+          index,
+          items: [
+            {
+              key,
+              value: text,
+              configId: config.config_id,
+              internalName: config.internal_name ?? '',
+              nodeId: config.nodeId,
+              index,
+              subIndex: -1,
+              previewType: checkParamType(value),
+              editConfig: {
+                ...config,
+                id: key,
+                config_id: config.config_id,
+                nodeId: config.nodeId,
+                internal_name: config.internal_name,
+                index,
+                value: text,
+              },
+            },
+          ],
+        });
+      });
+    }
+    return result;
+  }, [currentParamsConfig, type]);
+
+  const hasValues = rows.length > 0;
+  const hasPreviewable = useMemo(
+    () =>
+      rows.some((row) =>
+        row.items.some((item) => PREVIEWABLE_TYPES.includes(item.previewType)),
+      ),
+    [rows],
+  );
+
+  const updateEditStatus = (key: string, status: boolean) => {
+    setEditStatusMap((data) => ({ ...data, [key]: status }));
   };
 
-  const EditParamsValue = (props: {
-    id: string;
-    value: string;
-    nodeId?: string | number;
-    internal_name?: string;
-    index: number;
-  }) => {
-    const { id, value, internal_name = '', index, nodeId } = props;
-    const nodeInfo =
-      (nodeId ? currentNodeInfoMap[getNodeInfoKey(props as any)] : '') ||
-      ({} as NodeInfo);
-
-    // 图片模式：预览元素放大到 3 倍（40 -> 120）
-    const isImageMode = nodeInfo?.paramType === ValueTypeEnum.IMAGE;
-    const previewSize = isImageMode ? 120 : 40;
-
+  const getNodeInfoForItem = (item: ValueItem): NodeInfo => {
+    if (!item.nodeId) {
+      return {} as NodeInfo;
+    }
+    // 与 getNodeInfoKey 保持一致： `${nodeId}_${internal_name}`
     return (
-      <div className={cn('params-values-edit-value')}>
-        {editStatusMap[id] ? (
-          <InputParamsValue
-            size="default"
-            enterFrom="single-input"
-            currentParamConfig={props as any}
-            noSplit
-            placeholder={`${I18n.t('{internal_name}_value__enter_key_to_submit', { internal_name }, '{internal_name}值，enter键提交')}`}
-            defaultValue={value}
-            onChange={(v) => {
-              const temp = _.cloneDeep(currentParamsConfig);
-              if (type === 'group') {
-                const subIndex = temp.values.findIndex(
-                  (i) =>
-                    i.nodeId === nodeId && i.internal_name === internal_name,
-                );
-                temp.values[subIndex].values[index] =
-                  v instanceof Array ? v[0] : v;
-              } else {
-                temp.values[index] = v instanceof Array ? v[0] : v;
-              }
-              updateCurrentConfig({
-                values: temp.values,
-              });
-              updateEditStatus(id, false);
-            }}
-          />
-        ) : (
-          <div className="params-values-preview-container">
-            <ParamsValuePreview
-              value={value}
-              height={previewSize}
-              width={previewSize}
-              isError={
-                isShowValuesError
-                  ? !validateValueType(value, nodeInfo.paramType)
-                  : false
-              }
-            />
-          </div>
-        )}
-      </div>
+      currentNodeInfoMap[`${item.nodeId}_${item.internalName}`] ||
+      ({} as NodeInfo)
     );
   };
 
-  const currentColumns = useMemo(() => {
-    const columns: TableColumnProps[] = [
-      {
-        title: <>{I18n.t('serial_number', {}, '序号')}</>,
-        width: 100,
-        fixed: 'left',
-        render: (col, item, index) => (
-          <span>{formatSerialNumber(index + 1)}</span>
-        ),
-      },
-    ];
+  const handleValueChange = (item: ValueItem, rowId: string, next: any) => {
+    const value = next instanceof Array ? next[0] : next;
+    const temp = _.cloneDeep(currentParamsConfig);
     if (type === 'group') {
-      currentParamsConfig.values?.forEach((item) => {
-        columns.push({
-          title: item.internal_name,
-          dataIndex: `${item.config_id}value`,
-          width: 200,
-          render(col, i, index) {
-            return (
-              <EditParamsValue
-                id={i.id}
-                nodeId={item.nodeId}
-                value={i[`${item.config_id}value`]}
-                internal_name={item.internal_name}
-                index={index}
-              />
-            );
-          },
-        });
+      temp.values[item.subIndex].values[item.index] = value;
+    } else {
+      temp.values[item.index] = value;
+    }
+    updateCurrentConfig({ values: temp.values });
+    updateEditStatus(rowId, false);
+  };
+
+  const handleDelete = (index: number) => {
+    const temp = _.cloneDeep(currentParamsConfig);
+    if (type === 'group') {
+      temp.values?.forEach((config) => {
+        config.values?.splice(index, 1);
       });
     } else {
-      columns.push({
-        className: 'params-values-table-cell',
-        title: currentParamsConfig.internal_name,
-        dataIndex: `${currentParamsConfig.config_id}value`,
-        width: 200,
-        render(col, item, index) {
-          return (
-            <EditParamsValue
-              id={item.id}
-              nodeId={currentParamsConfig.nodeId}
-              value={item[`${currentParamsConfig.config_id}value`]}
-              internal_name={currentParamsConfig.internal_name}
-              index={index}
-            />
-          );
-        },
-      });
+      temp.values.splice(index, 1);
     }
-
-    columns.push({
-      title: <>{I18n.t('operation', {}, '操作')}</>,
-      fixed: 'right',
-      width: 100,
-      render(col, item, index) {
-        const handleDelete = () => {
-          if (type === 'group') {
-            currentParamsConfig.values?.forEach((p) => {
-              p.values.splice(index, 1);
-            });
-          } else {
-            currentParamsConfig.values.splice(index, 1);
-          }
-          useCreatorStore.setState({
-            currentParamsConfig: {
-              ...currentParamsConfig,
-            },
-          });
-        };
-        return (
-          <Space>
-            <Button
-              shape="circle"
-              icon={<IconEdit />}
-              size="mini"
-              onClick={() => {
-                setEditStatusMap((data) => ({
-                  ...data,
-                  [item.id]: true,
-                }));
-              }}
-            />
-            <Button
-              shape="circle"
-              icon={<IconDelete />}
-              size="mini"
-              onClick={handleDelete}
-            />
-          </Space>
-        );
-      },
-    });
-
-    return columns;
-  }, [currentParamsConfig, editStatusMap, isShowValuesError, currentNodeInfoMap]);
-
-  const currentData = useMemo(() => {
-    const data: { [k in string]: string }[] = [];
-    if (type === 'group') {
-      currentParamsConfig.values?.forEach((item) => {
-        item.values?.forEach((i, ind) => {
-          if (!data[ind]) {
-            data.push({
-              [`${item.config_id}value`]: i,
-              id: uuid(),
-            });
-          } else {
-            data[ind][`${item.config_id}value`] = i;
-          }
-        });
-      });
-    } else {
-      currentParamsConfig.values?.forEach((item) => {
-        data.push({
-          [`${currentParamsConfig.config_id}value`]: item,
-          id: uuid(),
-          nodeId: currentParamsConfig.nodeId,
-        });
-      });
-    }
-    return data;
-  }, [currentParamsConfig]);
-
-  const showGuide = useMemo(() => {
-    if (type === 'group') {
-      return currentParamsConfig.values.some(
-        (item) => item?.values?.length > 0,
-      );
-    }
-    return currentParamsConfig.values.length > 0;
-  }, [currentParamsConfig]);
+    // 卡片 key 是按下标生成的，删掉一项后下标会复用，清掉编辑态避免错位
+    setEditStatusMap({});
+    updateCurrentConfig({ values: temp.values });
+  };
 
   /** 清空当前参数的所有参数值 */
   const handleClearAllValues = () => {
+    setEditStatusMap({});
     if (type === 'group') {
       updateCurrentConfig({
         values: currentParamsConfig.values.map((item) => ({
@@ -273,9 +220,158 @@ export const ParamsValueList = () => {
     }
   };
 
-  const TableContent = useMemo(() => {
-    if (!showGuide) {
-      return (
+  return (
+    <div className={withPrefix('params-value-list')}>
+      <div className="title-container">
+        <span className="title">
+          {languageUtils.getText(TranslateKeys.PARAM_LIST)}
+        </span>
+        <div className="params-values-toolbar">
+          {hasValues && hasPreviewable && (
+            <ThumbnailSizeSlider
+              targetRef={cardsRef}
+              defaultValue={initialThumbSize}
+            />
+          )}
+          {hasValues && (
+            <Popconfirm
+              title={I18n.t(
+                'are_you_sure_to_clear_all_parameter_values',
+                {},
+                '确认清空所有参数值吗？',
+              )}
+              onOk={handleClearAllValues}
+            >
+              <Button
+                type="outline"
+                status="danger"
+                size="mini"
+                icon={<IconDelete />}
+              >
+                {I18n.t('clear_all', {}, '清空')}
+              </Button>
+            </Popconfirm>
+          )}
+        </div>
+      </div>
+
+      {hasValues ? (
+        <div
+          ref={cardsRef}
+          className={cn('params-values-cards', {
+            'is-text-only': !hasPreviewable,
+          })}
+          style={
+            {
+              '--params-thumb-size': `${initialThumbSize}px`,
+            } as CSSProperties
+          }
+        >
+          {rows.map((row) => {
+            const isEditing = Boolean(editStatusMap[row.id]);
+            return (
+              <div
+                className={cn('params-values-card', {
+                  'is-editing': isEditing,
+                })}
+                key={row.id}
+              >
+                <span className="params-values-card-index">
+                  {formatSerialNumber(row.index + 1)}
+                </span>
+                <Tooltip
+                  content={
+                    isEditing
+                      ? I18n.t('cancel_edit', {}, '取消编辑')
+                      : I18n.t(
+                          'edit_value_hint',
+                          {},
+                          '编辑该值（回车保存 / Esc 取消）',
+                        )
+                  }
+                >
+                  <Button
+                    className="params-values-card-edit"
+                    shape="circle"
+                    icon={isEditing ? <IconClose /> : <IconEdit />}
+                    size="mini"
+                    onClick={() => updateEditStatus(row.id, !isEditing)}
+                  />
+                </Tooltip>
+
+                {row.items.map((item) => {
+                  const previewable = PREVIEWABLE_TYPES.includes(
+                    item.previewType,
+                  );
+                  const nodeInfo = getNodeInfoForItem(item);
+                  const isError = isShowValuesError
+                    ? Boolean(nodeInfo.paramType) &&
+                      !validateValueType(item.value, nodeInfo.paramType)
+                    : false;
+                  return (
+                    <div className="params-values-card-item" key={item.key}>
+                      {type === 'group' && (
+                        <div
+                          className="params-values-card-label"
+                          title={item.internalName}
+                        >
+                          {item.internalName}
+                        </div>
+                      )}
+                      <div
+                        className={cn('params-values-card-stage', {
+                          'is-text': !previewable,
+                          'is-editing': isEditing,
+                        })}
+                        title={item.value}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            updateEditStatus(row.id, false);
+                          }
+                        }}
+                      >
+                        {isEditing ? (
+                          <InputParamsValue
+                            autoFocus
+                            size="default"
+                            enterFrom="single-input"
+                            currentParamConfig={item.editConfig}
+                            noSplit
+                            commitOnBlur={false}
+                            placeholder={`${I18n.t('{internal_name}_value__enter_key_to_submit', { internal_name: item.internalName }, '{internal_name}值，enter键提交')}`}
+                            defaultValue={item.value}
+                            onChange={(v) => handleValueChange(item, row.id, v)}
+                          />
+                        ) : (
+                          <ParamsValuePreview
+                            value={item.value}
+                            width="100%"
+                            height="100%"
+                            isError={isError}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* 删除按钮贴在预览图下方、与图片等宽，整块都是可点击区域 */}
+                <Button
+                  className="params-values-card-remove"
+                  status="danger"
+                  size="small"
+                  icon={<IconDelete />}
+                  long
+                  onClick={() => handleDelete(row.index)}
+                >
+                  {I18n.t('delete', {}, '删除')}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
         <img
           className="img"
           src={
@@ -285,51 +381,7 @@ export const ParamsValueList = () => {
           }
           alt=""
         />
-      );
-    } else {
-      return (
-        <Table
-          rowKey="id"
-          className={withPrefix('params-value-list-table')}
-          columns={currentColumns}
-          data={currentData}
-          pagination={false}
-          scroll={{
-            x: 500,
-            y: true,
-          }}
-        />
-      );
-    }
-  }, [currentData, currentColumns]);
-
-  return (
-    <div className={withPrefix('params-value-list')}>
-      <div className="title-container">
-        <span className="title">
-          {languageUtils.getText(TranslateKeys.PARAM_LIST)}
-        </span>
-        {showGuide && (
-          <Popconfirm
-            title={I18n.t(
-              'are_you_sure_to_clear_all_parameter_values',
-              {},
-              '确认清空所有参数值吗？',
-            )}
-            onOk={handleClearAllValues}
-          >
-            <Button
-              type="outline"
-              status="danger"
-              size="mini"
-              icon={<IconDelete />}
-            >
-              {I18n.t('clear_all', {}, '清空')}
-            </Button>
-          </Popconfirm>
-        )}
-      </div>
-      {TableContent}
+      )}
     </div>
   );
 };

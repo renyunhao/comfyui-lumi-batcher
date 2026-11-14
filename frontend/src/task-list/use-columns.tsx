@@ -110,7 +110,7 @@ export function useColumns(refresh: Function) {
         },
       },
       {
-        width: 220,
+        width: 280,
         title: I18n.t('operation', {}, '操作'),
         dataIndex: '_',
         fixed: 'right',

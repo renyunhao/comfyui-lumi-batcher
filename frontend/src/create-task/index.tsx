@@ -26,6 +26,8 @@ export const goToCreateTask = () => {
   sendBatchToolsCreateTask();
   useCreatorStore.setState({
     checkWorkflowLoading: true,
+    // 从列表进入「新建」时清除上一次的编辑目标，避免提交时误更新旧任务
+    editingTaskId: null,
   });
   createTaskCheck().then((flag) => {
     useCreatorStore.setState({
@@ -38,8 +40,8 @@ export const goToCreateTask = () => {
 };
 
 export const CreateTask = () => {
-  const [paramsConfig, reset] = useCreatorStore(
-    useShallow((s) => [s.paramsConfig, s.reset]),
+  const [paramsConfig, editingTaskId, reset] = useCreatorStore(
+    useShallow((s) => [s.paramsConfig, s.editingTaskId, s.reset]),
   );
   const [task] = useBatchToolsStore(useShallow((s) => [s.task]));
   const [changeType] = useContainerStore(useShallow((s) => [s.changeType]));
@@ -97,7 +99,11 @@ export const CreateTask = () => {
   return (
     <LayoutV2
       guideLink={task.newGuideHelpLink || newGuideHelpLink}
-      title={I18n.t('new_batch_task', {}, '新建批量任务')}
+      title={
+        editingTaskId
+          ? I18n.t('edit_batch_task', {}, '编辑批量任务')
+          : I18n.t('new_batch_task', {}, '新建批量任务')
+      }
       content={Content}
       backContent={BackContent}
       style={{

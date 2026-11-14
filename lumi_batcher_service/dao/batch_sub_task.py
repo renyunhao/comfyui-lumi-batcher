@@ -238,3 +238,83 @@ class BatchSubTaskDao:
                 return dict(row) if row else None
             except sqlite3.Error as e:
                 print(f"An error occurred on get task by prompt id: {e.args[0]}")
+
+    def get_unfinished(self, batch_task_id: str):
+        """取该任务下所有未开始/正在执行的子任务，用于暂停时精确移除排队项"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "get_unfinished.sql"))
+                cursor.execute(sql, (batch_task_id,))
+                return [dict(row) for row in cursor.fetchall()]
+            except sqlite3.Error as e:
+                print(f"An error occurred on get unfinished sub tasks: {e.args[0]}")
+                return []
+
+    def mark_paused(self, batch_task_id: str, exclude_prompt_id: str):
+        """把排队中的子任务标为暂停；当前正在执行的那一个要排除"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "mark_paused.sql"))
+                cursor.execute(sql, (batch_task_id, exclude_prompt_id or ""))
+                conn.commit()
+                return cursor.rowcount
+            except sqlite3.Error as e:
+                print(f"An error occurred on mark paused sub tasks: {e.args[0]}")
+                return 0
+
+    def get_paused(self, batch_task_id: str):
+        """取暂停的子任务，继续执行时按它们各自的参数组合重建 prompt"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "get_paused.sql"))
+                cursor.execute(sql, (batch_task_id,))
+                return [dict(row) for row in cursor.fetchall()]
+            except sqlite3.Error as e:
+                print(f"An error occurred on get paused sub tasks: {e.args[0]}")
+                return []
+
+    def requeue(self, sub_task_id: str, prompt_id: str):
+        """继续执行：给子任务换上新的 prompt_id 并回到排队状态"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "requeue.sql"))
+                cursor.execute(sql, (prompt_id, sub_task_id))
+                conn.commit()
+                return cursor.rowcount
+            except sqlite3.Error as e:
+                print(f"An error occurred on requeue sub task: {e.args[0]}")
+                return 0
+
+    def pause_all_unfinished(self, batch_task_id: str):
+        """重启恢复暂停任务：未完成的子任务统一回到 paused 等待继续"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+                sql = read_sql_file(
+                    os.path.join(self.sql_dir, "pause_all_unfinished.sql")
+                )
+                cursor.execute(sql, (batch_task_id,))
+                conn.commit()
+                return cursor.rowcount
+            except sqlite3.Error as e:
+                print(f"An error occurred on pause all unfinished: {e.args[0]}")
+                return 0
+
+    def count_active(self, batch_task_id: str):
+        """还有多少个 running / pending 子任务；为 0 时暂停才真正生效"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, "count_active.sql"))
+                cursor.execute(sql, (batch_task_id,))
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+            except sqlite3.Error as e:
+                print(f"An error occurred on count active sub tasks: {e.args[0]}")
+                return 0

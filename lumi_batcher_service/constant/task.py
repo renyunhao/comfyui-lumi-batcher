@@ -35,6 +35,10 @@ class PackageInfo(ToDictBase):
 
 
 class CommonTaskStatus(Enum):
+    PREPARED = "prepared"
+    """
+    已创建但尚未开始执行，可反复编辑参数
+    """
     RUNNING = "running"
     """
     正在执行中

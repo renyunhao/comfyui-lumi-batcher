@@ -20,8 +20,8 @@ import { languageUtils, TranslateKeys } from '@common/language';
 import { sendBatchToolsSubmitTask } from '../../../../data/points';
 
 export const RightPanel = () => {
-  const [taskName, paramsConfig, reset] = useCreatorStore(
-    useShallow((s) => [s.taskName, s.paramsConfig, s.reset]),
+  const [taskName, paramsConfig, editingTaskId, reset] = useCreatorStore(
+    useShallow((s) => [s.taskName, s.paramsConfig, s.editingTaskId, s.reset]),
   );
   const [changeType] = useContainerStore(useShallow((s) => [s.changeType]));
   const [loading, setLoading] = useState(false);
@@ -59,11 +59,9 @@ export const RightPanel = () => {
     sendBatchToolsSubmitTask();
     setLoading(true);
     try {
-      await new Promise((resolve) => {
-        createBatchTaskFunc().then(() => {
-          resolve('');
-        });
-      });
+      // 直接 await：保存失败时 createBatchTaskFunc 会抛错，走 catch 复位 loading，
+      // 并留在创建页保留未保存的编辑内容（不能用只 resolve 的 Promise 包装）
+      await createBatchTaskFunc();
       changeType(ContainerTypeEnum.List);
       reset();
     } catch (err) {
@@ -146,7 +144,9 @@ export const RightPanel = () => {
         >
           {loading
             ? languageUtils.getText(TranslateKeys.SPENT_LONG_TIME_TEXT)
-            : languageUtils.getText(TranslateKeys.SUBMIT_CREATE_BATCH_TASK)}
+            : editingTaskId
+              ? I18n.t('save_task', {}, '保存任务')
+              : languageUtils.getText(TranslateKeys.SUBMIT_CREATE_BATCH_TASK)}
         </Button>
       </section>
     </div>

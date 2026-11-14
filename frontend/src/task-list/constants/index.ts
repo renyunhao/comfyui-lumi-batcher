@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /** 批量工具上云后的任务状态枚举 */
 export enum TaskStatusEnum {
+  /** 已创建并保存，等待手动开始；可反复编辑 */
+  Prepared = 'prepared',
+  /** 已暂停：当前子任务跑完后不再继续后续执行 */
+  Paused = 'paused',
   /** 批量任务排队 */
   Waiting = 'waiting',
   /** 生成中 */

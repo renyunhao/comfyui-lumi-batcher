@@ -17,8 +17,8 @@ import { ContainerTypeEnum } from '@common/constant/container';
 import { languageUtils, TranslateKeys } from '@common/language';
 
 export const CreatorHeader = () => {
-  const [taskName, paramsConfig, reset] = useCreatorStore(
-    useShallow((s) => [s.taskName, s.paramsConfig, s.reset]),
+  const [taskName, paramsConfig, editingTaskId, reset] = useCreatorStore(
+    useShallow((s) => [s.taskName, s.paramsConfig, s.editingTaskId, s.reset]),
   );
   const [loading, setLoading] = useState(false);
   const [changeType] = useContainerStore(useShallow((s) => [s.changeType]));
@@ -100,7 +100,9 @@ export const CreatorHeader = () => {
         >
           {loading
             ? languageUtils.getText(TranslateKeys.SPENT_LONG_TIME_TEXT)
-            : languageUtils.getText(TranslateKeys.SUBMIT_CREATE_BATCH_TASK)}
+            : editingTaskId
+              ? I18n.t('save_task', {}, '保存任务')
+              : languageUtils.getText(TranslateKeys.SUBMIT_CREATE_BATCH_TASK)}
         </Button>
       </section>
     </div>

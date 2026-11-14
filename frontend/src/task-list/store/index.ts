@@ -57,6 +57,8 @@ export const useTaskListStore = create<TaskListStateType>((set) => ({
     status?.forEach((it) => {
       filtedStatus.push(
         ...{
+          [TaskStatusEnum.Prepared]: ['prepared'],
+          [TaskStatusEnum.Paused]: ['paused'],
           [TaskStatusEnum.Waiting]: ['waiting'],
           [TaskStatusEnum.Running]: ['running'],
           [TaskStatusEnum.PartiallySucceeded]: ['partial-success'],

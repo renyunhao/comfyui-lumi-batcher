@@ -5,6 +5,14 @@ import { I18n } from '@common/i18n';
 
 export const TaskStatusFilterList = [
   {
+    label: I18n.t('preparing', {}, '准备中'),
+    value: [TaskStatusEnum.Prepared],
+  },
+  {
+    label: I18n.t('paused', {}, '已暂停'),
+    value: [TaskStatusEnum.Paused],
+  },
+  {
     label: I18n.t('generating', {}, '生成中'),
     value: [TaskStatusEnum.Running, TaskStatusEnum.Completed],
   },

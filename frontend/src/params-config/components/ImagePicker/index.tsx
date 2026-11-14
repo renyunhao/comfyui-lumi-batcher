@@ -253,7 +253,9 @@ export const ImagePicker: React.FC<{
       unmountOnExit
       title={I18n.t('image_picker_title', {}, '浏览图片')}
       onCancel={onCancel}
-      style={{ width: 'min(1120px, 94vw)', top: 36 }}
+      // 按视口尺寸铺开，不再用固定像素宽高限制：大屏下弹窗也只占中间一小块
+      // 的话，文件树 / 缩略图网格 / 大图预览都得不到利用
+      style={{ width: '90vw', top: '5vh' }}
       // 参数配置弹窗的层级是 9999，选择器必须盖在它上面
       wrapStyle={{ zIndex: 10000 }}
     >

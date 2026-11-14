@@ -58,6 +58,8 @@ export enum TranslateKeys {
   STATUS_PARTIAL_SUCCEED = 'status_partial_succeed',
   STATUS_WAITING = 'status_waiting',
   STATUS_DIRTY = 'status_dirty',
+  STATUS_PREPARED = 'status_prepared',
+  STATUS_PAUSED = 'status_paused',
   DELETE = 'Delete',
   EDIT = 'Edit',
 
