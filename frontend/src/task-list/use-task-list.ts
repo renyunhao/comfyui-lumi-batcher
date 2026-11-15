@@ -123,14 +123,16 @@ export function useTaskList() {
           total: res.data.total,
           loading: false,
         });
-
-        isGettingTaskList.current = false;
       } catch (error) {
         console.error('获取任务列表失败');
         setState({
           isError: true,
           loading: false,
         });
+      } finally {
+        // 并发的 simpleGetTaskList 会改写 currentReqKey，上面的守卫 return
+        // 曾经漏掉重置，导致 isGettingTaskList 永久为 true、之后所有轮询都被跳过，
+        // 表现为「暂停后停在列表页不刷新，要手动点一下才变」。
         isGettingTaskList.current = false;
       }
     },

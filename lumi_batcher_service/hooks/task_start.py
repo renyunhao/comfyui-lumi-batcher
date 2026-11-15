@@ -22,6 +22,8 @@ def batch_tools_task_start_hook(batchToolsHandler: BatchToolsHandler):
                     batchToolsHandler.batchSubTaskDao.update_property(
                         prompt_id, "status", CommonTaskStatus.RUNNING.value
                     )
+                    # 记录真正开始执行的时刻，结果对比用它计算子任务耗时
+                    batchToolsHandler.batchSubTaskDao.mark_started(prompt_id)
                     # print(
                     #     "--------------更新成功------------------", json.dumps(all_args)
                     # )

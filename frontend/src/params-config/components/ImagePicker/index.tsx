@@ -83,6 +83,37 @@ const buildTree = (files: string[]) => {
   return root;
 };
 
+/**
+ * Shift 连选：把「锚点 → 目标」区间（含两端）叠加到基础选中集合上。
+ * 区间按当前可见文件列表的顺序计算，和用户看到的网格顺序一致。
+ * 锚点或目标不在当前可见列表（换了目录 / 搜索）时返回 null，
+ * 由调用方退化为普通点击。
+ */
+export const getShiftSelection = (
+  visibleFiles: string[],
+  baseSelected: string[],
+  anchor: string | null,
+  target: string,
+): string[] | null => {
+  const from = anchor ? visibleFiles.indexOf(anchor) : -1;
+  const to = visibleFiles.indexOf(target);
+  if (from < 0 || to < 0) {
+    return null;
+  }
+  const start = Math.min(from, to);
+  const end = Math.max(from, to);
+  const range = new Set(visibleFiles.slice(start, end + 1));
+  const base = new Set(baseSelected);
+  const visibleSet = new Set(visibleFiles);
+  // 其它目录 / 搜索前已选的项保留，当前可见项按网格顺序排，
+  // 保证导入的参数值顺序和屏幕上看到的顺序一致
+  const outside = baseSelected.filter((file) => !visibleSet.has(file));
+  const inside = visibleFiles.filter(
+    (file) => range.has(file) || base.has(file),
+  );
+  return Array.from(new Set([...outside, ...inside]));
+};
+
 export const ImagePicker: React.FC<{
   visible: boolean;
   files: string[];
@@ -97,6 +128,10 @@ export const ImagePicker: React.FC<{
   const [active, setActive] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']));
   const wasVisible = useRef(false);
+  /** 上一次「普通点击」的文件，作为 Shift 连选的起点 */
+  const anchorRef = useRef<string | null>(null);
+  /** 本轮 Shift 连选开始前的选中集合：反复调整末端时不会残留上一次的区间 */
+  const baseSelectedRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (visible === wasVisible.current) {
@@ -109,16 +144,14 @@ export const ImagePicker: React.FC<{
     const fileSet = new Set(files);
     const picked = Array.from(new Set(value.filter((v) => fileSet.has(v))));
     const first = picked[0] || files[0] || '';
-    const dir = first ? dirOf(first) : '';
     setSelected(picked);
+    baseSelectedRef.current = picked;
+    anchorRef.current = null;
     setQuery('');
     setActive(first);
-    setFolder(dir);
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      ancestorsOf(dir).forEach((path) => next.add(path));
-      return next;
-    });
+    // 默认停在根目录（全部文件），不再跳到第一张图片所在的子目录
+    setFolder('');
+    setExpanded(new Set(['']));
   }, [visible, files, value]);
 
   const tree = useMemo(() => buildTree(files), [files]);
@@ -128,6 +161,8 @@ export const ImagePicker: React.FC<{
     if (keyword) {
       return files.filter((file) => file.toLowerCase().includes(keyword));
     }
+    // 根目录与其它目录行为一致：只列出当前目录下的直属文件，
+    // 子文件夹的内容通过目录树 / 面包屑进入；空目录显示「这里没有图片」
     return files.filter((file) => dirOf(file) === folder);
   }, [files, query, folder]);
 
@@ -146,25 +181,48 @@ export const ImagePicker: React.FC<{
     }
   }, [visible, visibleFiles, active]);
 
-  const toggleSelected = (file: string) => {
+  const toggleSelected = (file: string, shiftKey = false) => {
     setActive(file);
-    setSelected((prev) => {
-      if (!multiple) {
-        return [file];
+    if (!multiple) {
+      setSelected([file]);
+      anchorRef.current = file;
+      return;
+    }
+    if (shiftKey) {
+      const range = getShiftSelection(
+        visibleFiles,
+        baseSelectedRef.current,
+        anchorRef.current,
+        file,
+      );
+      if (range) {
+        setSelected(range);
+        return;
       }
-      return prev.includes(file)
-        ? prev.filter((item) => item !== file)
-        : [...prev, file];
-    });
+    }
+    // 普通点击：切换选中，并把它作为下一次 Shift 连选的锚点
+    const next = selected.includes(file)
+      ? selected.filter((item) => item !== file)
+      : [...selected, file];
+    setSelected(next);
+    baseSelectedRef.current = next;
+    anchorRef.current = file;
   };
 
   /** 全选/取消全选当前可见（含搜索结果）的图片 */
   const toggleSelectAll = () => {
-    setSelected((prev) =>
-      visibleAllSelected
-        ? prev.filter((item) => !visibleSet.has(item))
-        : Array.from(new Set([...prev, ...visibleFiles])),
-    );
+    const next = visibleAllSelected
+      ? selected.filter((item) => !visibleSet.has(item))
+      : Array.from(new Set([...selected, ...visibleFiles]));
+    setSelected(next);
+    baseSelectedRef.current = next;
+    anchorRef.current = null;
+  };
+
+  const clearSelection = () => {
+    setSelected([]);
+    baseSelectedRef.current = [];
+    anchorRef.current = null;
   };
 
   const confirm = () => {
@@ -220,7 +278,7 @@ export const ImagePicker: React.FC<{
           <span className="image-picker-folder-name">
             {node.path
               ? node.name
-              : I18n.t('image_picker_root', {}, '全部（input）')}
+              : I18n.t('image_picker_root', {}, '全部（根目录）')}
           </span>
           <span className="image-picker-folder-count">{node.count}</span>
         </button>
@@ -232,7 +290,7 @@ export const ImagePicker: React.FC<{
   const crumbs = useMemo(() => {
     const items = [
       {
-        label: I18n.t('image_picker_root', {}, '全部（input）'),
+        label: I18n.t('image_picker_root', {}, '全部（根目录）'),
         path: '',
       },
     ];
@@ -274,6 +332,15 @@ export const ImagePicker: React.FC<{
             onChange={setQuery}
             onPressEnter={confirm}
           />
+          {multiple && (
+            <span className="image-picker-hint">
+              {I18n.t(
+                'image_picker_shift_select_tip',
+                {},
+                '点击一张图后按住 Shift 点击另一张，可连选中间全部',
+              )}
+            </span>
+          )}
         </div>
         <div className="image-picker-body">
           <div className="image-picker-tree">{renderFolder(tree)}</div>
@@ -305,36 +372,59 @@ export const ImagePicker: React.FC<{
                 visibleFiles.map((file) => {
                   const isSelected = selectedSet.has(file);
                   return (
-                    <button
+                    <div
                       key={file}
-                      type="button"
                       className={`image-picker-card${isSelected ? ' is-selected' : ''}`}
-                      title={file}
-                      onClick={() => toggleSelected(file)}
-                      onDoubleClick={() => {
-                        if (!multiple) {
-                          onConfirm([file]);
-                        }
-                      }}
                     >
-                      <img
-                        className="image-picker-thumb"
-                        src={getImageUrlV2(file, 'input')}
-                        alt=""
-                        loading="lazy"
-                        onError={(e) => {
-                          e.currentTarget.style.visibility = 'hidden';
+                      {/* 上半部分：切换选中 / Shift 连选；双击在单选模式下直接采用 */}
+                      <button
+                        type="button"
+                        className="image-picker-card-select"
+                        title={`${file} — ${I18n.t('image_picker_select_hint', {}, '点击选中')}${multiple ? ` · ${I18n.t('image_picker_shift_hint', {}, 'Shift 点击连选')}` : ''}`}
+                        aria-label={I18n.t(
+                          'image_picker_select_hint',
+                          {},
+                          '点击选中',
+                        )}
+                        onClick={(e) => toggleSelected(file, e.shiftKey)}
+                        onDoubleClick={() => {
+                          if (!multiple) {
+                            onConfirm([file]);
+                          }
                         }}
-                      />
-                      {isSelected && (
-                        <span className="image-picker-check">
-                          <IconCheck />
+                      >
+                        <img
+                          className="image-picker-thumb"
+                          src={getImageUrlV2(file, 'input')}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.style.visibility = 'hidden';
+                          }}
+                        />
+                        {isSelected && (
+                          <span className="image-picker-check">
+                            <IconCheck />
+                          </span>
+                        )}
+                      </button>
+                      {/* 下半部分：只更新右侧大图预览，不改变选中状态 */}
+                      <button
+                        type="button"
+                        className="image-picker-card-view"
+                        title={`${file} — ${I18n.t('image_picker_view_hint', {}, '点击查看大图，不选中')}`}
+                        aria-label={I18n.t(
+                          'image_picker_view_hint',
+                          {},
+                          '点击查看大图，不选中',
+                        )}
+                        onClick={() => setActive(file)}
+                      >
+                        <span className="image-picker-name">
+                          {query ? file : nameOf(file)}
                         </span>
-                      )}
-                      <span className="image-picker-name">
-                        {query ? file : nameOf(file)}
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                   );
                 })
               )}
@@ -359,7 +449,7 @@ export const ImagePicker: React.FC<{
                 </Button>
               )}
               {selected.length > 0 && (
-                <Button type="text" size="mini" onClick={() => setSelected([])}>
+                <Button type="text" size="mini" onClick={clearSelection}>
                   {I18n.t('clear_all', {}, '清空')}
                 </Button>
               )}

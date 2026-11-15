@@ -27,6 +27,8 @@ export interface TaskResultInfo {
   task_perf_id: string;
   status: string;
   reason: string;
+  /** 子任务执行时长（毫秒，execution_start → task_done）；历史任务为 undefined */
+  duration?: number;
 }
 
 export interface GetRoomResultsResponse {

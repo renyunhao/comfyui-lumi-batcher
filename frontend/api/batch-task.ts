@@ -124,6 +124,33 @@ export async function resumeTask(id: string) {
   return res.data;
 }
 
+export interface CombineItem {
+  type?: string;
+  nodeId?: string | number;
+  name?: string;
+  internal_name?: string;
+  config_id?: string;
+  category?: string;
+  value?: any;
+  values?: CombineItem[];
+}
+
+export interface UnfinishedParamsResponse {
+  /** 每个未完成子任务对应的参数组合（每项带当次使用的 value） */
+  combines: CombineItem[][];
+  /** 原任务的参数配置，供前端比对参考 */
+  params_config: ParamsConfigType;
+}
+
+/** 获取任务中所有非成功子任务的参数组合，用于复制后重跑 */
+export async function getUnfinishedParams(taskId: string) {
+  const res = await requestClient.get<ApiResWrap<UnfinishedParamsResponse>>(
+    `${apiPrefix}/batch-task/unfinished-params`,
+    { params: { batch_task_id: taskId } },
+  );
+  return res.data.data;
+}
+
 /**
  * @description 取消任务
  */

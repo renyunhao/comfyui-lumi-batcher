@@ -237,6 +237,22 @@ export const languageConfigMap: Record<
     [LanguagesEnum.ZH]: '已暂停',
     [LanguagesEnum.EN]: 'Paused',
   },
+  [TranslateKeys.RESULT_TIME]: {
+    [LanguagesEnum.ZH]: '耗时',
+    [LanguagesEnum.EN]: 'Duration',
+  },
+  [TranslateKeys.RESULT_PROMPT]: {
+    [LanguagesEnum.ZH]: '提示词',
+    [LanguagesEnum.EN]: 'Prompt',
+  },
+  [TranslateKeys.FULL_PROMPT]: {
+    [LanguagesEnum.ZH]: '完整提示词',
+    [LanguagesEnum.EN]: 'Full Prompt',
+  },
+  [TranslateKeys.CLICK_VIEW_FULL_PROMPT]: {
+    [LanguagesEnum.ZH]: '点击查看完整提示词',
+    [LanguagesEnum.EN]: 'Click to view full prompt',
+  },
 
   [TranslateKeys.RESET]: {
     [LanguagesEnum.ZH]: '重置',

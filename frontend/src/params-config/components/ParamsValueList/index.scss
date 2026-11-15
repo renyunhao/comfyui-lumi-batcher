@@ -6,17 +6,26 @@
   box-sizing: border-box;
   padding: 16px 24px;
   background: var(---color-fill-1, rgba(255, 255, 255, 0.04));
-  height: 100%;
-  flex: 1;
-  overflow: hidden;
+  // 高度完全由内容撑开：一旦给固定高度，sticky 会被父元素边界
+  // 提前推走；也不能设 hidden，否则会捕获标题栏的 sticky
+  overflow: visible;
   width: calc(100vw - 240px);
 
   .title-container {
+    // 相对弹窗滚动容器吸顶；top 由组件按
+    //「header 高度 + 上方已吸顶的参数选择行高度」动态算出
+    position: sticky;
+    top: 160px;
+    // 高于参数选择行(9)，万一有几像素偏差也优先保住工具栏可见
+    z-index: 10;
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-shrink: 0;
     gap: 16px;
+    padding: 8px 0 12px;
+    background: #000;
+    border-bottom: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.08));
   }
 
   .title {
@@ -85,7 +94,7 @@
     gap: 16px;
     flex: 1;
     min-height: 0;
-    margin-top: 16px;
+    margin-top: 12px;
     padding-bottom: 24px;
     overflow: auto;
     @include scrollbar();
@@ -110,16 +119,32 @@
     box-shadow: 0 0 0 1px rgb(var(--primary-6));
   }
 
+  // 拖拽中的源卡片变淡、目标卡片高亮，让落点一目了然
+  .params-values-card.is-dragging {
+    opacity: 0.4;
+  }
+
+  .params-values-card.is-drag-over {
+    border-color: rgb(var(--primary-6));
+    box-shadow: 0 0 0 2px rgb(var(--primary-6));
+  }
+
   // 纯文本参数没有缩略图，用固定的易读宽度，不受尺寸滑块影响
   .params-values-cards.is-text-only .params-values-card {
     width: clamp(180px, 16vw, 260px);
   }
 
-  .params-values-card-index {
+  .params-values-card-top-left {
     position: absolute;
     top: 6px;
     left: 6px;
-    z-index: 2;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .params-values-card-index {
     padding: 1px 6px;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
@@ -130,11 +155,69 @@
     pointer-events: none;
   }
 
+  // 拖拽区：图片 / 视频的上半部分整块可拖，下半部分保留点击打开大图；
+  // 音频 / 纯文本的内容只在顶部一行，拖拽区放在其下方留白。
+  // 它是预览组件的兄弟节点，点拖拽区不会触发 Image 的预览。
+  .params-values-card-drag {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--color-text-2, rgba(255, 255, 255, 0.9));
+    font-size: 22px;
+    cursor: grab;
+    user-select: none;
+    background: transparent;
+    transition: background 0.15s;
+
+    &.is-half {
+      height: 50%;
+    }
+
+    // 音频 / 纯文本只有顶部一行内容（播放按钮、文件名），
+    // 把拖拽区放到它下方的大块留白，既不挡交互又有足够操作面积
+    &.is-lower {
+      top: 32px;
+      height: auto;
+      bottom: 0;
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    svg {
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+  }
+
+  .params-values-card:hover .params-values-card-drag {
+    background: rgba(0, 0, 0, 0.3);
+
+    &.is-half {
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.22);
+    }
+
+    &.is-lower {
+      border-top: 1px dashed rgba(255, 255, 255, 0.22);
+    }
+
+    svg {
+      opacity: 1;
+    }
+  }
+
   .params-values-card-edit {
     position: absolute;
     top: 6px;
     right: 6px;
-    z-index: 2;
+    z-index: 4;
     opacity: 0.8;
 
     &:hover {

@@ -73,6 +73,19 @@ class BatchSubTaskDao:
                 cursor = conn.cursor()
                 sql = read_sql_file(os.path.join(self.sql_dir, "create_table.sql"))
                 cursor.execute(sql)
+                # 老库没有耗时字段：CREATE TABLE IF NOT EXISTS 不会给已有表补列，
+                # 这里按 PRAGMA 的结果逐列补上，保证升级后历史任务仍可正常打开
+                existing_columns = {
+                    row[1]
+                    for row in cursor.execute(
+                        "PRAGMA table_info(batch_sub_task)"
+                    ).fetchall()
+                }
+                for column in ("start_time", "end_time"):
+                    if column not in existing_columns:
+                        cursor.execute(
+                            f"ALTER TABLE batch_sub_task ADD COLUMN {column} REAL"
+                        )
                 # 开启WAL模式
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.commit()
@@ -175,6 +188,27 @@ class BatchSubTaskDao:
                 return cursor.lastrowid
         except sqlite3.Error as e:
             print(f"An error occurred on update task property: {e.args[0]}")
+
+    def _set_execution_time(self, prompt_id: str, sql_name: str):
+        """记录子任务开始 / 结束时间（毫秒），与库里其它时间字段单位一致"""
+        try:
+            with sqlite3.connect(self.db_file) as conn:
+                cursor = conn.cursor()
+                sql = read_sql_file(os.path.join(self.sql_dir, sql_name))
+                cursor.execute(sql, (int(time.time()) * 1000, prompt_id))
+                conn.commit()
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            print(f"An error occurred on update sub task time: {e.args[0]}")
+            return 0
+
+    def mark_started(self, prompt_id: str):
+        """execution_start 钩子：子任务真正开始执行"""
+        return self._set_execution_time(prompt_id, "update_start_time.sql")
+
+    def mark_finished(self, prompt_id: str):
+        """task_done 钩子：子任务执行结束"""
+        return self._set_execution_time(prompt_id, "update_end_time.sql")
 
     @timing_decorator
     def execute_action(self, actionType: SubTaskActionType, batch_task_id: str):
@@ -284,7 +318,9 @@ class BatchSubTaskDao:
             try:
                 cursor = conn.cursor()
                 sql = read_sql_file(os.path.join(self.sql_dir, "requeue.sql"))
-                cursor.execute(sql, (prompt_id, sub_task_id))
+                # id 与 prompt_id 一起换成新值，保持两者相等的不变式，
+                # 否则完成钩子按新 prompt_id 更新时会找不到这条子任务
+                cursor.execute(sql, (prompt_id, prompt_id, sub_task_id))
                 conn.commit()
                 return cursor.rowcount
             except sqlite3.Error as e:

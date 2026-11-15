@@ -222,18 +222,23 @@ export const InputParamsValue: React.FC<InputParamsValueProps> = (props) => {
     setPickerVisible(false);
   }, []);
 
-  const openImagePicker = useCallback(() => {
-    setPopupVisible(false);
-    pickerVisibleRef.current = true;
-    setPickerVisible(true);
+  /** 拉取 ComfyUI input 目录（含子目录）下的媒体文件 */
+  const refreshInputFiles = useCallback(() => {
     getInputFiles('image')
       .then((res) => {
         setInputImageFiles(res?.data ?? []);
       })
       .catch((e) => {
-        console.error('获取 input 图片列表失败:', e);
+        console.error('获取媒体文件列表失败:', e);
       });
   }, []);
+
+  const openImagePicker = useCallback(() => {
+    setPopupVisible(false);
+    pickerVisibleRef.current = true;
+    setPickerVisible(true);
+    refreshInputFiles();
+  }, [refreshInputFiles]);
 
   const SuffixComp = useMemo(
     () => (

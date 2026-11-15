@@ -49,11 +49,27 @@ def process_output(result: list[dict]):
 
                 outputs.append(temp)
 
+        # 暂停 / 未执行 / 失败的子任务没有任何输出，不进入结果对比：
+        # 否则它们会以空结果占据参数组合，可能被优先匹配成单元格内容，
+        # 让已有结果的任务看起来「生成结果列全是空的」
+        if not outputs:
+            continue
+
+        # 执行时长 = execution_start 到 task_done 的间隔（毫秒）。
+        # 库里的 create_time / update_time 都只是「入队时刻」且从不更新，
+        # 不能用来算耗时；升级前的历史任务没有新字段，返回 None 由前端显示 '-'。
+        start_time = r.get("start_time")
+        end_time = r.get("end_time")
+        duration = None
+        if start_time and end_time and end_time >= start_time:
+            duration = end_time - start_time
+
         results.append(
             {
                 "ParamsConfig": params_config,
                 "sub_task_id": sub_task_id,
                 "list": outputs,
+                "duration": duration,
             }
         )
 

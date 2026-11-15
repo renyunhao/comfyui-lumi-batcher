@@ -10,6 +10,10 @@ CREATE TABLE
     create_time REAL NOT NULL,
     -- 更新时间
     update_time REAL NOT NULL,
+    -- 开始执行时间（毫秒，由 execution_start 钩子写入）
+    start_time REAL,
+    -- 执行结束时间（毫秒，由 task_done 钩子写入）
+    end_time REAL,
     -- 批量协议
     params_config TEXT NOT NULL,
     -- 子任务状态

@@ -5,10 +5,16 @@ import { useMemo, useState } from 'react';
 import { Message } from '@arco-design/web-react';
 
 import { I18n } from '@common/i18n';
-import { ParamsConfigType } from '@common/type/batch-task';
+import {
+  ParamsConfigType,
+  ParamsConfigTypeItem,
+} from '@common/type/batch-task';
+import { uuid } from '@common/utils/uuid';
 import {
   cancelTask,
+  CombineItem,
   deleteTask,
+  getUnfinishedParams,
   pauseTask,
   removeTask,
   resumeTask,
@@ -28,6 +34,89 @@ import {
 } from '../../../../data/points';
 import { TaskStatusEnum } from '@src/task-list/constants';
 
+type FlatCombine = Map<string, { item: CombineItem; value: any }>;
+
+const leafKey = (item: CombineItem) =>
+  `${item.nodeId ?? ''}::${item.internal_name ?? ''}`;
+
+/** 把一个子任务组合摊平为「参数 key -> 当次取值」，group 内的子项也要展开 */
+const flattenCombine = (combine: CombineItem[]): FlatCombine => {
+  const map: FlatCombine = new Map();
+  combine.forEach((item) => {
+    if (!item || item.category === 'system') {
+      return;
+    }
+    const push = (child: CombineItem) => {
+      if (
+        !child ||
+        child.category === 'system' ||
+        child.nodeId === undefined ||
+        !child.internal_name
+      ) {
+        return;
+      }
+      map.set(leafKey(child), { item: child, value: child.value });
+    };
+    if (item.type === 'group' && Array.isArray(item.values)) {
+      item.values.forEach(push);
+    } else {
+      push(item);
+    }
+  });
+  return map;
+};
+
+/**
+ * 把未完成组合还原为可直接提交的 paramsConfig：
+ * 多个参数用 group 按组合下标对齐，保证只生成这些组合、不发生叉乘膨胀。
+ */
+const buildUnfinishedParamsConfig = (
+  combines: CombineItem[][],
+): ParamsConfigType => {
+  const flatList = combines.map(flattenCombine);
+  const keys: string[] = [];
+  flatList.forEach((flat) =>
+    flat.forEach((_, key) => {
+      if (!keys.includes(key)) {
+        keys.push(key);
+      }
+    }),
+  );
+
+  if (!keys.length) {
+    return [];
+  }
+
+  const children: ParamsConfigType = keys.map((key) => {
+    const sample = flatList
+      .map((flat) => flat.get(key))
+      .find((entry) => !!entry);
+    const item = sample?.item ?? {};
+    return {
+      type: 'data',
+      nodeId: item.nodeId,
+      name: item.name ?? String(item.internal_name ?? ''),
+      internal_name: item.internal_name,
+      config_id: uuid(),
+      values: flatList.map((flat) => flat.get(key)?.value ?? ''),
+    } as ParamsConfigTypeItem;
+  });
+
+  if (children.length === 1) {
+    return children;
+  }
+  return [
+    {
+      type: 'group',
+      nodeId: undefined,
+      name: '',
+      internal_name: undefined,
+      config_id: uuid(),
+      values: children,
+    } as ParamsConfigTypeItem,
+  ];
+};
+
 export default function useHandler(task: TaskInfo) {
   const { changeType } = useContainerStore();
   const { setTask, openDrawer } = useResultViewStore();
@@ -38,6 +127,7 @@ export default function useHandler(task: TaskInfo) {
   const [startLoading, setStartLoading] = useState(false);
   const [pauseLoading, setPauseLoading] = useState(false);
   const [resumeLoading, setResumeLoading] = useState(false);
+  const [copyUnfinishedLoading, setCopyUnfinishedLoading] = useState(false);
 
   return useMemo(() => {
     const { id, name, status } = task;
@@ -55,11 +145,21 @@ export default function useHandler(task: TaskInfo) {
           setStartLoading(false);
         }
       },
-      /** 暂停：不打断当前执行项，跑完后由后端收敛为已暂停 */
-      async pause() {
+      /** 暂停：返回 requested（已请求）/ ignored（最后一项，无需暂停）/ failed */
+      async pause(): Promise<'requested' | 'ignored' | 'failed'> {
         try {
           setPauseLoading(true);
-          await pauseTask(id);
+          const res = await pauseTask(id);
+          if (res?.data?.ignored) {
+            Message.info(
+              I18n.t(
+                'task_pause_ignored_last',
+                {},
+                '当前已是最后一个子任务，无需暂停，任务将正常结束',
+              ),
+            );
+            return 'ignored';
+          }
           Message.success(
             I18n.t(
               'task_pause_requested',
@@ -67,8 +167,10 @@ export default function useHandler(task: TaskInfo) {
               '已请求暂停，当前任务结束后将停止后续执行',
             ),
           );
+          return 'requested';
         } catch (error) {
           Message.error(I18n.t('task_pause_failed', {}, '暂停任务失败'));
+          return 'failed';
         } finally {
           setPauseLoading(false);
         }
@@ -175,6 +277,62 @@ export default function useHandler(task: TaskInfo) {
           });
         }
       },
+      /** 只复制未完成子任务的参数组合，精确还原后带入创建页重跑 */
+      async copyUnfinished() {
+        try {
+          setCopyUnfinishedLoading(true);
+          const data = await getUnfinishedParams(id);
+          const combines = data?.combines ?? [];
+          if (!combines.length) {
+            Message.info(
+              I18n.t('no_unfinished_params', {}, '该任务没有未完成的参数'),
+            );
+            return;
+          }
+          const paramsConfig = buildUnfinishedParamsConfig(combines);
+          if (!paramsConfig.length) {
+            Message.warning(
+              I18n.t(
+                'unfinished_params_empty',
+                {},
+                '未完成的参数组合为空，无法复制',
+              ),
+            );
+            return;
+          }
+          if (
+            await validateWorkflowParamsConfig(
+              paramsConfig,
+              I18n.t(
+                'unfinished_params_incompatible',
+                {},
+                '未完成参数与当前工作流不兼容，无法复制',
+              ),
+            )
+          ) {
+            copyTask({
+              taskName: `${name}[未完成]`,
+              paramsConfig,
+            });
+            changeType(ContainerTypeEnum.Creator);
+            Message.success({
+              content: I18n.t(
+                'unfinished_params_copied',
+                { n: combines.length },
+                `已复制 ${combines.length} 组未完成参数`,
+              ),
+              duration: 2000,
+            });
+          }
+        } catch (error) {
+          console.error('复制未完成参数失败', error);
+          Message.error(
+            I18n.t('copy_unfinished_params_failed', {}, '复制未完成参数失败'),
+          );
+        } finally {
+          setCopyUnfinishedLoading(false);
+        }
+      },
       /**
        * @description 清除任务：仅移除任务记录，不删除结果文件
        */
@@ -203,6 +361,7 @@ export default function useHandler(task: TaskInfo) {
       startLoading,
       pauseLoading,
       resumeLoading,
+      copyUnfinishedLoading,
     };
   }, [
     task,
@@ -212,5 +371,6 @@ export default function useHandler(task: TaskInfo) {
     startLoading,
     pauseLoading,
     resumeLoading,
+    copyUnfinishedLoading,
   ]);
 }

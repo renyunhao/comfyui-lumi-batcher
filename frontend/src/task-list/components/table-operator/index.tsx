@@ -1,13 +1,15 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { Popconfirm } from '@arco-design/web-react';
 import {
+  IconClockCircle,
   IconCloseCircle,
   IconEdit,
   IconPause,
   IconPlayArrow,
+  IconRedo,
 } from '@arco-design/web-react/icon';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -37,6 +39,8 @@ export default function TableOperator({
   const [uiConfig] = useBatchToolsStore(useShallow((s) => [s.uiConfig]));
   const statusType = task.status;
   const handler = useHandler(task);
+  /** 点击后先乐观置位，避免等列表刷新回来这段时间按钮看起来「没反应」 */
+  const [pauseRequestedLocal, setPauseRequestedLocal] = useState(false);
 
   const isPrepared = statusType === TaskStatusEnum.Prepared;
   const isPaused = statusType === TaskStatusEnum.Paused;
@@ -44,12 +48,26 @@ export default function TableOperator({
     statusType === TaskStatusEnum.Waiting ||
     statusType === TaskStatusEnum.Running;
 
+  // 真值以后端 extra.pause_requested 为准：刷新页面、多端操作都能保持一致；
+  // 任务收敛为 paused（后端会清标记）或取消暂停后，撤销本地乐观状态
+  useEffect(() => {
+    if (!isActive || !task.extra?.pause_requested) {
+      setPauseRequestedLocal(false);
+    }
+  }, [isActive, task.status, task.extra?.pause_requested]);
+
+  const isPauseRequested =
+    isActive && (!!task.extra?.pause_requested || pauseRequestedLocal);
+
   /*
    * 各状态的操作矩阵：
-   *   准备    编辑 / 开始 / 复制 / 清除 / 删除（还没有结果，不提供取消与结果对比）
-   *   执行中  暂停 / 取消 / 结果对比 / 复制 / 清除 / 删除
-   *   已暂停  继续 / 取消 / 结果对比 / 复制 / 清除 / 删除
-   *   终态    结果对比 / 下载 / 复制 / 清除 / 删除
+   *   准备    编辑 / 开始 / 复制 / 清除 / 删除（还没有子任务，不提供复制未完成）
+   *   执行中  暂停 / 取消 / 结果对比 / 复制 / 复制未完成 / 清除 / 删除
+   *   已暂停  继续 / 取消 / 结果对比 / 复制 / 复制未完成 / 清除 / 删除
+   *   终态    结果对比 / 下载 / 复制 / 复制未完成 / 清除 / 删除
+   *
+   * 注：点了暂停但当前项还没跑完时，暂停按钮变成「已请求暂停」（时钟图标 +
+   * 警告色 + 呼吸动画、不可再点）；后端收敛为 paused 后自动切成「继续」。
    */
   const showEditBtn = isPrepared;
   const showStartBtn = isPrepared;
@@ -78,6 +96,15 @@ export default function TableOperator({
       showCopyBtn &&
       task.scene !== BatchTaskSceneEnum.LocalTask,
     [showCopyBtn, task.scene, uiConfig.showCopy],
+  );
+
+  // 准备态还没有子任务，无所谓「未完成」；本地导入任务同样不适用
+  const showCopyUnfinishedOperation = useMemo(
+    () =>
+      uiConfig.showCopy &&
+      !isPrepared &&
+      task.scene !== BatchTaskSceneEnum.LocalTask,
+    [isPrepared, task.scene, uiConfig.showCopy],
   );
 
   return (
@@ -131,19 +158,38 @@ export default function TableOperator({
       ) : null}
 
       {showPauseBtn ? (
-        <IconButtonTooltip
-          loading={handler.pauseLoading}
-          icon={<IconPause />}
-          tooltip={I18n.t(
-            'pause_task',
-            {},
-            '暂停（当前任务跑完后停止后续执行）',
-          )}
-          onClick={async () => {
-            await handler.pause();
-            refresh();
-          }}
-        />
+        isPauseRequested ? (
+          // 已请求暂停：换图标 + 警告色，且不再响应点击，避免忘记是否点过
+          <IconButtonTooltip
+            className="task-operator-pause-pending"
+            status="warning"
+            icon={<IconClockCircle />}
+            tooltip={I18n.t(
+              'pause_task_pending',
+              {},
+              '已请求暂停：当前任务结束后将停止后续执行',
+            )}
+          />
+        ) : (
+          <IconButtonTooltip
+            loading={handler.pauseLoading}
+            icon={<IconPause />}
+            tooltip={I18n.t(
+              'pause_task',
+              {},
+              '暂停（当前任务跑完后停止后续执行）',
+            )}
+            onClick={async () => {
+              const result = await handler.pause();
+              // 后端判定「当前已是最后一项」时不会进入暂停流程，
+              // 此时不要显示「已请求暂停」的时钟图标
+              if (result === 'requested') {
+                setPauseRequestedLocal(true);
+              }
+              refresh();
+            }}
+          />
+        )
       ) : null}
 
       {showCancelOperation ? (
@@ -182,6 +228,14 @@ export default function TableOperator({
           icon={<IconCopy />}
           tooltip={languageUtils.getText(TranslateKeys.COPY_PARAMS)}
           onClick={handler.copy}
+        />
+      ) : null}
+      {showCopyUnfinishedOperation ? (
+        <IconButtonTooltip
+          loading={handler.copyUnfinishedLoading}
+          icon={<IconRedo />}
+          tooltip={I18n.t('copy_unfinished_params', {}, '复制未完成的参数')}
+          onClick={handler.copyUnfinished}
         />
       ) : null}
       <Popconfirm

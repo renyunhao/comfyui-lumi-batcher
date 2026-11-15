@@ -60,6 +60,11 @@ export enum TranslateKeys {
   STATUS_DIRTY = 'status_dirty',
   STATUS_PREPARED = 'status_prepared',
   STATUS_PAUSED = 'status_paused',
+  /** 结果对比里的执行耗时 / 提示词列（key 沿用旧名，展示文案已改为耗时） */
+  RESULT_TIME = 'result_time',
+  RESULT_PROMPT = 'result_prompt',
+  FULL_PROMPT = 'full_prompt',
+  CLICK_VIEW_FULL_PROMPT = 'click_view_full_prompt',
   DELETE = 'Delete',
   EDIT = 'Edit',
 

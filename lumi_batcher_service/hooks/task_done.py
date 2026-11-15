@@ -112,6 +112,8 @@ def batch_tools_task_done_hook(batchToolsHandler: BatchToolsHandler):
                 batchToolsHandler.batchSubTaskDao.update_property(
                     prompt_id, "status", status
                 )
+                # 先把结束时间落库：后续输出解析若抛异常，耗时仍然有效
+                batchToolsHandler.batchSubTaskDao.mark_finished(prompt_id)
 
                 batchSubTaskInfo = (
                     batchToolsHandler.batchSubTaskDao.get_task_by_prompt_id(prompt_id)
@@ -135,6 +137,27 @@ def batch_tools_task_done_hook(batchToolsHandler: BatchToolsHandler):
                             CommonTaskStatus.PARTIAL_SUCCESS.value,
                             CommonTaskStatus.CANCELLED.value,
                         ]
+
+                        # 当前项结束后是否还有「点继续才需要跑」的子任务：
+                        # 仍在 running / pending 的，或已标 paused 但没出结果的。
+                        # 都没有说明当前项就是最后一项，暂停已无意义，应照常
+                        # 收敛为终态并打包，不该停在 paused 让用户再点一次继续。
+                        sub_dao = batchToolsHandler.batchSubTaskDao
+                        need_resume = sub_dao.count_active(batch_task_id) > 0 or any(
+                            not batchToolsHandler.sub_task_has_output(sub)
+                            for sub in (sub_dao.get_paused(batch_task_id) or [])
+                        )
+                        if (
+                            pause_requested
+                            and not need_resume
+                            and current_status is not None
+                            and current_status not in terminal_status
+                        ):
+                            extra["pause_requested"] = False
+                            batchToolsHandler.batchTaskDao.update_property(
+                                batch_task_id, "extra", json.dumps(extra)
+                            )
+                            pause_requested = False
 
                         # 暂停请求中：当前正在执行的子任务照常收尾并计数，
                         # 但不判定为终态、也不打包；等它跑完再收敛为 paused

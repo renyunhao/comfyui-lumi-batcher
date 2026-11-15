@@ -1,10 +1,15 @@
 // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { CSSProperties } from 'react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, Popconfirm, Tooltip } from '@arco-design/web-react';
-import { IconClose, IconDelete, IconEdit } from '@arco-design/web-react/icon';
+import {
+  IconClose,
+  IconDelete,
+  IconDragDotVertical,
+  IconEdit,
+} from '@arco-design/web-react/icon';
 import cn from 'classnames';
 import _ from 'lodash';
 import { useShallow } from 'zustand/react/shallow';
@@ -34,6 +39,23 @@ const withPrefix = createWithPrefix(BrandName);
 
 /** 只有这些类型有缩略图可看，滑块也只在它们出现时才有意义 */
 const PREVIEWABLE_TYPES: ValueType[] = ['image', 'video', 'audio'];
+
+/** 把 from 位置的元素移动到 to 位置；下标越界或原地不动时返回副本 */
+export const moveItem = <T,>(list: T[], from: number, to: number): T[] => {
+  if (
+    from === to ||
+    from < 0 ||
+    to < 0 ||
+    from >= list.length ||
+    to >= list.length
+  ) {
+    return [...list];
+  }
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+};
 
 interface ValueItem {
   /** 稳定 key：编辑态依赖它，不能像原来那样每次重算 uuid */
@@ -75,9 +97,44 @@ export const ParamsValueList = () => {
   const [editStatusMap, setEditStatusMap] = useState<Record<string, boolean>>(
     {},
   );
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  /** 只有从把手按下才允许发起拖拽，避免和编辑 / 删除 / 查看大图冲突 */
+  const fromHandleRef = useRef(false);
+  /** dragover / drop 读 ref，不依赖 state 更新时机 */
+  const dragFromRef = useRef<number | null>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
   // 只在挂载时读取一次，之后尺寸完全由滑块自己维护
   const initialThumbSize = useMemo(() => readThumbSize(), []);
+
+  /**
+   * 标题栏吸顶位置 = 参数选择行的吸顶位置 + 该行高度。
+   * 参数选择行在窄屏可能换行变高，用 ResizeObserver 跟着更新。
+   */
+  const [stickyTop, setStickyTop] = useState(160);
+  useEffect(() => {
+    const row = document.querySelector<HTMLElement>(
+      '.params-config-sticky-row',
+    );
+    if (!row) {
+      return;
+    }
+    const update = () => {
+      // 必须对齐参数选择行自己的吸顶位置（它 CSS 里写死 top: 80px）。
+      // 不能用 header 实际高度代替：两者不相等时会算出偏小的 top，
+      // 两层 sticky 重叠，标题栏被压在下面只露出一条边。
+      const rowTop = Number.parseFloat(getComputedStyle(row).top) || 80;
+      // 多留 2px，避免亚像素误差造成边缘遮挡
+      setStickyTop(Math.round(rowTop + row.offsetHeight) + 2);
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, []);
 
   const { type } = currentParamsConfig;
 
@@ -205,6 +262,35 @@ export const ParamsValueList = () => {
     updateCurrentConfig({ values: temp.values });
   };
 
+  const resetDrag = () => {
+    fromHandleRef.current = false;
+    dragFromRef.current = null;
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+  };
+
+  /**
+   * 拖拽换序：group 模式下所有子参数必须同步移动同一个下标，
+   * 否则一组里各参数的值会错配成别的组合。
+   */
+  const handleReorder = (from: number, to: number) => {
+    if (from === to || Number.isNaN(from)) {
+      return;
+    }
+    const temp = _.cloneDeep(currentParamsConfig);
+    if (type === 'group') {
+      temp.values = temp.values.map((config) => ({
+        ...config,
+        values: moveItem(config.values ?? [], from, to),
+      }));
+    } else {
+      temp.values = moveItem(temp.values ?? [], from, to);
+    }
+    // 卡片 key 与编辑态都按下标生成，重排后清掉避免输入框错位
+    setEditStatusMap({});
+    updateCurrentConfig({ values: temp.values });
+  };
+
   /** 清空当前参数的所有参数值 */
   const handleClearAllValues = () => {
     setEditStatusMap({});
@@ -222,7 +308,7 @@ export const ParamsValueList = () => {
 
   return (
     <div className={withPrefix('params-value-list')}>
-      <div className="title-container">
+      <div className="title-container" style={{ top: stickyTop }}>
         <span className="title">
           {languageUtils.getText(TranslateKeys.PARAM_LIST)}
         </span>
@@ -266,19 +352,84 @@ export const ParamsValueList = () => {
               '--params-thumb-size': `${initialThumbSize}px`,
             } as CSSProperties
           }
+          onDragOver={(e) => {
+            if (dragFromRef.current === null) {
+              return;
+            }
+            // 允许在卡片之间的间隙放下，否则拖偏一点就会毫无反应
+            e.preventDefault();
+          }}
+          onDrop={(e) => {
+            // 卡片自身的 onDrop 会先处理并清空 dragFromRef；
+            // 仍为非空说明落在了空白区域，兜底把该项移到末尾
+            if (dragFromRef.current === null || e.target !== e.currentTarget) {
+              return;
+            }
+            e.preventDefault();
+            handleReorder(dragFromRef.current, rows.length - 1);
+            resetDrag();
+          }}
         >
           {rows.map((row) => {
             const isEditing = Boolean(editStatusMap[row.id]);
+            const canDrag = rows.length > 1;
             return (
               <div
                 className={cn('params-values-card', {
                   'is-editing': isEditing,
+                  'is-dragging': draggingIndex === row.index,
+                  'is-drag-over':
+                    dragOverIndex === row.index &&
+                    draggingIndex !== null &&
+                    draggingIndex !== row.index,
                 })}
                 key={row.id}
+                draggable={canDrag && !isEditing}
+                onMouseDown={(e) => {
+                  fromHandleRef.current = Boolean(
+                    (e.target as HTMLElement).closest(
+                      '.params-values-card-drag',
+                    ),
+                  );
+                }}
+                onDragStart={(e) => {
+                  // 卡片本身 draggable，但只允许从把手发起；
+                  // 否则拖图片、点按钮、选输入框文字都会误触发拖拽
+                  if (!fromHandleRef.current || isEditing) {
+                    e.preventDefault();
+                    return;
+                  }
+                  dragFromRef.current = row.index;
+                  setDraggingIndex(row.index);
+                  e.dataTransfer.effectAllowed = 'move';
+                  // Firefox 必须 setData 才会真正开始拖拽
+                  e.dataTransfer.setData('text/plain', String(row.index));
+                }}
+                onDragOver={(e) => {
+                  if (dragFromRef.current === null) {
+                    return;
+                  }
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverIndex !== row.index) {
+                    setDragOverIndex(row.index);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const from = dragFromRef.current;
+                  if (from !== null) {
+                    handleReorder(from, row.index);
+                  }
+                  resetDrag();
+                }}
+                onDragEnd={resetDrag}
               >
-                <span className="params-values-card-index">
-                  {formatSerialNumber(row.index + 1)}
-                </span>
+                <div className="params-values-card-top-left">
+                  <span className="params-values-card-index">
+                    {formatSerialNumber(row.index + 1)}
+                  </span>
+                </div>
                 <Tooltip
                   content={
                     isEditing
@@ -303,6 +454,11 @@ export const ParamsValueList = () => {
                   const previewable = PREVIEWABLE_TYPES.includes(
                     item.previewType,
                   );
+                  // 图片 / 视频铺满整块预览区，按上下对半分区；
+                  // 音频 / 文本只有顶部一行内容，拖拽区放到下方留白
+                  const hasFullPreview =
+                    item.previewType === 'image' ||
+                    item.previewType === 'video';
                   const nodeInfo = getNodeInfoForItem(item);
                   const isError = isShowValuesError
                     ? Boolean(nodeInfo.paramType) &&
@@ -350,6 +506,28 @@ export const ParamsValueList = () => {
                             height="100%"
                             isError={isError}
                           />
+                        )}
+                        {/* 上半部分拖拽、下半部分点击打开大图；
+                            没有大图预览的类型整块都可拖 */}
+                        {canDrag && !isEditing && (
+                          <span
+                            className={cn(
+                              'params-values-card-drag',
+                              hasFullPreview ? 'is-half' : 'is-lower',
+                            )}
+                            title={I18n.t(
+                              'drag_to_reorder',
+                              {},
+                              '按住拖拽调整参数值顺序',
+                            )}
+                            aria-label={I18n.t(
+                              'drag_to_reorder',
+                              {},
+                              '按住拖拽调整参数值顺序',
+                            )}
+                          >
+                            <IconDragDotVertical />
+                          </span>
                         )}
                       </div>
                     </div>

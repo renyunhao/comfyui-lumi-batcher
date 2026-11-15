@@ -1,7 +1,8 @@
 SELECT
     id,
     prompt_id,
-    params_config
+    params_config,
+    output
 FROM
     batch_sub_task
 WHERE

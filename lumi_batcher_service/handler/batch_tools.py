@@ -5,6 +5,7 @@ import copy
 import json
 import mimetypes
 import os
+import time
 import traceback
 import uuid
 import aiofiles
@@ -291,15 +292,37 @@ class BatchToolsHandler:
                         getErrorResponse("", "只有执行中的任务可以暂停")
                     )
 
+                unfinished = self.batchSubTaskDao.get_unfinished(batch_task_id)
+                unfinished_ids = [row["prompt_id"] for row in unfinished]
+                running = getRunningQueue()
+                running_id = running if running in unfinished_ids else None
+
+                # 当前正在执行的已经是最后一项时，暂停没有意义：没有后续子任务
+                # 可停，要求用户再点一次「继续」反而是多余操作。此时不写暂停
+                # 标记，让 task_done 钩子按正常流程收敛终态并打包结果。
+                paused_todo = [
+                    sub
+                    for sub in (self.batchSubTaskDao.get_paused(batch_task_id) or [])
+                    if not self.sub_task_has_output(sub)
+                ]
+                others_active = [pid for pid in unfinished_ids if pid != running_id]
+                if running_id and not others_active and not paused_todo:
+                    return web.json_response(
+                        {
+                            "code": 200,
+                            "message": "当前已是最后一个子任务，无需暂停，任务将正常结束",
+                            "data": {"status": task.get("status"), "ignored": True},
+                        }
+                    )
+
                 extra = json.loads(task.get("extra", "{}"))
                 extra["pause_requested"] = True
+                # 供列表轮询的收敛兜底判断时长，避开「刚点暂停」的竞态窗口
+                extra["pause_requested_at"] = time.time()
                 self.batchTaskDao.update_property(
                     batch_task_id, "extra", json.dumps(extra)
                 )
 
-                unfinished = self.batchSubTaskDao.get_unfinished(batch_task_id)
-                unfinished_ids = [row["prompt_id"] for row in unfinished]
-                running = getRunningQueue()
                 # 只删排队项，绝不调用 interruptQueue / 不传当前 running
                 to_delete = [pid for pid in unfinished_ids if pid != running]
                 if to_delete:
@@ -354,6 +377,14 @@ class BatchToolsHandler:
                 resumed = 0
 
                 for sub in paused_subs:
+                    # 已经生成过结果的子任务绝不重跑：暂停时完成钩子可能没
+                    # 及时把状态从 running 改成 success，被一并标成 paused。
+                    # 这里按实际输出兜底，并修正状态，避免下次继续时又重建。
+                    if self.sub_task_has_output(sub):
+                        self.batchSubTaskDao.update_property(
+                            sub["id"], "status", SubTaskStatus.SUCCESS.value
+                        )
+                        continue
                     try:
                         params_combine = json.loads(sub.get("params_config", "[]"))
                         item = self.build_batch_item(
@@ -389,14 +420,16 @@ class BatchToolsHandler:
                 )
 
                 if self.batchSubTaskDao.count_active(batch_task_id) == 0:
-                    # 没有可继续的子任务时，按累计计数直接收敛到终态
+                    # 没有可继续的子任务时，按「实际有输出的子任务数」收敛终态，
+                    # 不依赖可能被漏写或重复累计的 status_counts
                     queue_count = task.get("queue_count", 0)
-                    success = status_counts.get(
-                        CommonTaskStatus.SUCCESS.value, 0
+                    all_subs = self.batchSubTaskDao.get_result(batch_task_id) or []
+                    done_count = sum(
+                        1 for sub in all_subs if self.sub_task_has_output(sub)
                     )
-                    if success == queue_count and queue_count > 0:
+                    if done_count == queue_count and queue_count > 0:
                         status = CommonTaskStatus.SUCCESS.value
-                    elif success > 0:
+                    elif done_count > 0:
                         status = CommonTaskStatus.PARTIAL_SUCCESS.value
                     else:
                         status = CommonTaskStatus.FAILED.value
@@ -427,6 +460,10 @@ class BatchToolsHandler:
                 page_num = int(query.get("page_num", 1))
                 name = query.get("name", "")
                 status = query.get("status", None)
+
+                # 暂停收敛兜底：task_done 钩子漏触发时，列表轮询这里按实际
+                # 队列状态收尾，避免任务永远停在「已请求暂停」
+                self.settle_pause_requested_tasks()
 
                 data, count = self.batchTaskDao.get_task_list(
                     name, status, page_size, (page_num - 1) * page_size
@@ -589,6 +626,60 @@ class BatchToolsHandler:
                 return web.json_response(response)
             except Exception as e:
                 return web.json_response(getErrorResponse(e, "获取结果列表失败"))
+
+        @server.PromptServer.instance.routes.get(
+            getApiPath("/batch-task/unfinished-params")
+        )
+        async def get_unfinished_params(request):
+            """返回所有非成功子任务的参数组合，供「复制未完成参数」重跑使用。"""
+            try:
+                batch_task_id = str(
+                    request.rel_url.query.get("batch_task_id", "")
+                )
+                if not batch_task_id:
+                    return web.json_response(
+                        getErrorResponse(
+                            ValueError("batch_task_id"), "缺少 batch_task_id"
+                        )
+                    )
+
+                combines = []
+                for sub in self.batchSubTaskDao.get_result(batch_task_id) or []:
+                    # 以「有没有生成结果」为准，而不是子任务 status：
+                    # 暂停、重启、完成钩子漏写都可能让 status 不准；已经出图的
+                    # 组合不该被复制重跑，而 status=success 却没有输出的组合
+                    # 恰恰是用户想补跑的。
+                    if self.sub_task_has_output(sub):
+                        continue
+                    try:
+                        combine = json.loads(sub.get("params_config", "[]"))
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(combine, list) and combine:
+                        combines.append(combine)
+
+                task = self.batchTaskDao.get_task_by_id(batch_task_id)
+                params_config = []
+                if task is not None:
+                    try:
+                        params_config = json.loads(task.get("params_config", "[]"))
+                    except (TypeError, ValueError):
+                        params_config = []
+
+                return web.json_response(
+                    {
+                        "code": 200,
+                        "message": "获取未完成参数成功",
+                        "data": {
+                            "combines": combines,
+                            "params_config": params_config,
+                        },
+                    }
+                )
+            except Exception as e:
+                return web.json_response(
+                    getErrorResponse(e, "获取未完成参数失败")
+                )
 
         @server.PromptServer.instance.routes.get(getApiPath("/view-image"))
         async def view_image(request):
@@ -963,6 +1054,113 @@ class BatchToolsHandler:
         if tasks:
             print(f"recover {len(tasks)} paused task(s) after reboot")
         return len(tasks)
+
+    def get_queue_prompt_ids(self):
+        """取 ComfyUI 队列里仍在 running / pending 的 prompt_id；取不到返回 None"""
+        try:
+            current_queue = server.PromptServer.instance.prompt_queue.get_current_queue()
+            result = set()
+            for bucket in current_queue[:2]:
+                for item in bucket:
+                    result.add(item[1])
+            return result
+        except Exception as e:
+            print("get queue prompt ids error", e)
+            return None
+
+    @staticmethod
+    def sub_task_has_output(sub: dict) -> bool:
+        """子任务是否已经有生成结果（与结果对比的输出判定保持一致）"""
+        try:
+            output = json.loads(sub.get("output") or "[]")
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(output, list):
+            return False
+        return any(
+            isinstance(item, dict) and bool(item.get("values"))
+            for item in output
+        )
+
+    def finish_pause(self, task_id: str, task: dict):
+        """
+        收敛暂停请求并清除标记：
+        还有需要继续的子任务 -> paused；已经全部跑完 -> 直接收敛为终态。
+        后者覆盖「当前项就是最后一项」以及钩子漏写状态的情况，避免任务
+        停在「已暂停」还要用户多点一次「继续」。
+        """
+        try:
+            extra = json.loads(task.get("extra") or "{}")
+        except (ValueError, TypeError):
+            extra = {}
+        extra["pause_requested"] = False
+        self.batchTaskDao.update_property(task_id, "extra", json.dumps(extra))
+
+        need_resume = self.batchSubTaskDao.count_active(task_id) > 0 or any(
+            not self.sub_task_has_output(sub)
+            for sub in (self.batchSubTaskDao.get_paused(task_id) or [])
+        )
+        if need_resume:
+            status = CommonTaskStatus.PAUSED.value
+        else:
+            # 与 resume 的终态判定口径一致：按实际有输出的子任务数，
+            # 不依赖可能漏写 / 重复累计的 status_counts
+            queue_count = task.get("queue_count", 0)
+            all_subs = self.batchSubTaskDao.get_result(task_id) or []
+            done_count = sum(
+                1 for sub in all_subs if self.sub_task_has_output(sub)
+            )
+            if done_count == queue_count and queue_count > 0:
+                status = CommonTaskStatus.SUCCESS.value
+            elif done_count > 0:
+                status = CommonTaskStatus.PARTIAL_SUCCESS.value
+            else:
+                status = CommonTaskStatus.FAILED.value
+        self.batchTaskDao.update_property(task_id, "status", status)
+        return status
+
+    def settle_pause_requested_tasks(self):
+        """
+        暂停收敛兜底，由列表轮询触发。
+
+        正常路径是 task_done 钩子在最后一个子任务跑完后把任务置为 paused；
+        但「当前项已经是最后一个子任务」等边界下，钩子可能漏触发，或没把
+        子任务状态从 running 改掉，导致 count_active 永远不为 0，任务就一直
+        停在 running + pause_requested，前端始终显示「已请求暂停」。
+        这里按 ComfyUI 队列的实际状态再兜一次，不依赖钩子时机。
+        """
+        tasks = self.batchTaskDao.get_pause_requested_unfinished() or []
+        for task in tasks:
+            task_id = task.get("id")
+            if not task_id:
+                continue
+            if self.batchSubTaskDao.count_active(task_id) == 0:
+                self.finish_pause(task_id, task)
+                continue
+
+            # 子任务状态可能没被钩子更新：队列里已经没有本任务的 active 项，
+            # 说明它们实际都已执行结束，把残留项标为 paused 供「继续」重建。
+            # 请求至少经过 3 秒才启用这个判断，避开「刚点暂停、当前项还没
+            # 从队列移除」的瞬间；老数据没有时间戳则立即生效，便于自愈。
+            try:
+                requested_at = float(
+                    json.loads(task.get("extra") or "{}").get(
+                        "pause_requested_at", 0
+                    )
+                    or 0
+                )
+            except (ValueError, TypeError):
+                requested_at = 0
+            if requested_at and time.time() - requested_at < 3:
+                continue
+
+            queue_ids = self.get_queue_prompt_ids()
+            if queue_ids is None:
+                continue
+            active_subs = self.batchSubTaskDao.get_unfinished(task_id) or []
+            if not any(row.get("prompt_id") in queue_ids for row in active_subs):
+                self.batchSubTaskDao.pause_all_unfinished(task_id)
+                self.finish_pause(task_id, task)
 
     @staticmethod
     def build_snapshot(json_data, prompt, workflow, number):

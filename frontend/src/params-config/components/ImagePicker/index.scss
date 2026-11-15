@@ -19,13 +19,22 @@
 .image-picker-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   flex-shrink: 0;
+  gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
 }
 
 .image-picker-search {
   width: min(360px, 100%);
+}
+
+// Shift 连选的操作提示
+.image-picker-hint {
+  color: var(--color-text-3);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .image-picker-body {
@@ -140,6 +149,10 @@
 .image-picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  // 卡片靠 aspect-ratio 撑高度，而可滚动 Grid 的 auto 行会按 min-content
+  // 计算、把 aspect-ratio 元素的高度算成 0。文件多到需要滚动时所有行塌缩，
+  // 卡片就变成小扁框。显式按内容撑开行高，让内容正常溢出滚动。
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 8px;
   flex: 1;
@@ -150,15 +163,15 @@
 
 .image-picker-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   padding: 4px;
   border: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
   border-radius: 6px;
   background: var(--color-fill-2);
   color: var(--color-text-2);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 
   &:hover {
     border-color: rgb(var(--primary-5));
@@ -170,9 +183,52 @@
   }
 }
 
+// 卡片上半部分（缩略图）：点击切换选中
+.image-picker-card-select {
+  display: block;
+  width: 100%;
+  // 由容器保证正方形，不依赖 img 自身在 button 内的 aspect-ratio 表现，
+  // 避免文件较多时出现缩略图被拉伸 / 卡片高度不一致
+  aspect-ratio: 1;
+  // 卡片是 flex column，默认允许收缩；显式禁止，避免行高紧张时被压扁
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover .image-picker-thumb {
+    outline: 2px solid rgb(var(--primary-5));
+    outline-offset: -2px;
+  }
+}
+
+// 卡片下半部分（文件名）：只更新右侧大图预览，不改变选中状态
+.image-picker-card-view {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px 2px 2px;
+  border: none;
+  border-top: 1px solid var(--color-border-2, rgba(255, 255, 255, 0.12));
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: zoom-in;
+
+  &:hover {
+    background: var(--color-fill-3);
+    color: rgb(var(--primary-6));
+  }
+}
+
 .image-picker-thumb {
   display: block;
   width: 100%;
+  height: 100%;
   aspect-ratio: 1;
   object-fit: contain;
   border-radius: 4px;
@@ -196,7 +252,6 @@
 
 .image-picker-name {
   display: block;
-  padding: 4px 2px 2px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

@@ -20,8 +20,12 @@ class PollingManager {
         return;
       }
       this.cbProcessMap.set(key, true);
-      await cb();
-      this.cbProcessMap.set(key, false);
+      try {
+        await cb();
+      } finally {
+        // 回调抛错时也要释放，否则该 key 的轮询会永久空转
+        this.cbProcessMap.set(key, false);
+      }
     }, duration);
     this.timerMap.set(key, timer);
   }
@@ -35,15 +39,20 @@ class PollingManager {
       // @ts-ignore
       clearInterval(timer);
     }
+    this.timerMap.delete(key);
+    // 定时器重建时上一次回调可能还没结束，残留的 true 会让新轮询永远空转
+    this.cbProcessMap.delete(key);
   }
 
   clearAll() {
-    this.timerMap.forEach((value) => {
+    this.timerMap.forEach((value, key) => {
       if (value) {
         // @ts-ignore
         clearInterval(value);
       }
+      this.cbProcessMap.delete(key);
     });
+    this.timerMap.clear();
   }
 }
 

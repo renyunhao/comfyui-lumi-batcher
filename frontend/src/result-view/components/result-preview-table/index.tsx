@@ -14,6 +14,7 @@ import { customCompare } from '@common/components/PreviewTable/utils/compare';
 import { PreviewTable } from '@common/components/PreviewTable';
 import { memoryMap } from '@common/utils/advanced-map';
 import { orderColumns, orderRows } from './order';
+import { ResultRowLabelKey } from './utils';
 
 export const ResultPreviewTable = () => {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -80,10 +81,24 @@ export const ResultPreviewTable = () => {
     const { get: filterConfigGet } = memoryMap(configMap);
     const { get: orderConfigGet } = memoryMap(configMap);
 
-    return orderColumns(columns, orderConfigGet).filter((c) => {
+    const orderedColumns = orderColumns(columns, orderConfigGet).filter((c) => {
       const config = filterConfigGet(c.dataIndex || '');
       return config?.selected !== false;
     });
+
+    // 「以列展示」的行标题列是结构列，必须始终在最前。
+    // orderColumns 在某个值列没有排序配置时会走 result[i] = col 保留原位，
+    // 恰好覆盖掉按 order 放在 result[1] 的首列，导致行名列整个消失。
+    const rowLabelColumn = columns.find(
+      (c) => c.dataIndex === ResultRowLabelKey,
+    );
+    if (!rowLabelColumn) {
+      return orderedColumns;
+    }
+    return [
+      rowLabelColumn,
+      ...orderedColumns.filter((c) => c !== rowLabelColumn),
+    ];
   }, [columns, customColumns]);
 
   const finalData = useMemo(() => {

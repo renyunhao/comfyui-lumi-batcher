@@ -83,3 +83,24 @@
     mask-composite: exclude !important; /* 标准属性 */
   }
 }
+
+/* 已请求暂停：配合时钟图标与警告色做呼吸提示，避免忘记是否点过 */
+.task-operator-pause-pending {
+  animation: task-operator-pause-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes task-operator-pause-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-operator-pause-pending {
+    animation: none;
+  }
+}

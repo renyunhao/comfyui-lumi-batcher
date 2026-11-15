@@ -61,11 +61,15 @@ export function useColumns(refresh: Function) {
                   taskList: [...taskList],
                   stopPollingList: true,
                 });
-                await execUpdateTaskName(item.id, finalValue, refresh);
-                useTaskListStore.setState({
-                  taskList: [...taskList],
-                  stopPollingList: false,
-                });
+                try {
+                  await execUpdateTaskName(item.id, finalValue, refresh);
+                } finally {
+                  // 更新失败也必须恢复轮询，否则列表会一直停在上一次结果
+                  useTaskListStore.setState({
+                    taskList: [...taskList],
+                    stopPollingList: false,
+                  });
+                }
               }
             }}
           />
@@ -110,7 +114,8 @@ export function useColumns(refresh: Function) {
         },
       },
       {
-        width: 280,
+        // 新增「复制未完成参数」后最多会有 7 个操作项，留足宽度避免换行
+        width: 320,
         title: I18n.t('operation', {}, '操作'),
         dataIndex: '_',
         fixed: 'right',
