@@ -12,7 +12,7 @@ import { ReactComponent as IconQuestion } from '@static/icons/question.svg';
 import Header from './components/header';
 import { ResultPreviewTable } from './components/result-preview-table';
 import styles from './index.module.scss';
-import { useResultViewStore } from './store';
+import { useResultViewStore, nextFocusToken } from './store';
 import { getDefaultConfigOptionIndex } from './util';
 import useResize from '@common/hooks/use-resize';
 import { processResourceUrl } from '@common/utils/process-resource';
@@ -51,6 +51,8 @@ export default function TaskResultView() {
         });
         setState((state) => ({
           detail,
+          // 每次结果就绪都让表格重新定位一次（进行中的任务 / 全部完成时回到顶部）
+          focusToken: nextFocusToken(),
           selectedConfigOptionIndex:
             isNumber(selectedConfigOptionIndex) &&
             selectedConfigOptionIndex >= 0 &&

@@ -45,15 +45,17 @@ export const CustomChange: React.FC<{
     let rightImg = '';
 
     if (leftCell) {
-      if (leftCell.filter((item) => item.type === 'image').length > 0) {
-        leftImg = leftCell.filter((item) => item.type === 'image')[0].value[0];
+      const leftImages = leftCell.filter((item) => item.type === 'image');
+      if (leftImages.length > 0) {
+        leftImg = leftImages[0].value[0];
       }
+    }
 
-      if (rightCell) {
-        if (rightCell.filter((item) => item.type === 'image').length > 0) {
-          rightImg = rightCell.filter((item) => item.type === 'image')[0]
-            .value[0];
-        }
+    // 右侧与左侧相互独立：第一列没有左邻时，右侧预览仍要显示
+    if (rightCell) {
+      const rightImages = rightCell.filter((item) => item.type === 'image');
+      if (rightImages.length > 0) {
+        rightImg = rightImages[0].value[0];
       }
     }
 

@@ -9,12 +9,18 @@ import { calcPercentSize } from '../../util';
 import { processColumns, processRows } from '../../util/process_filter';
 import styles from './index.module.scss';
 import { useColumns } from './use-columns';
-import { useData } from './use-data';
+import { getCases, useData } from './use-data';
+import { findPendingRowIndex, focusTableRow } from './focus-row';
+import { SingleParamResultKey } from './utils';
 import { customCompare } from '@common/components/PreviewTable/utils/compare';
 import { PreviewTable } from '@common/components/PreviewTable';
+import { type PreviewTableDataType } from '@common/components/PreviewTable/type/table';
 import { memoryMap } from '@common/utils/advanced-map';
 import { orderColumns, orderRows } from './order';
 import { ResultRowLabelKey } from './utils';
+
+/** 定位滚动的时间点（毫秒）：覆盖抽屉入场动画、表格重挂载与可视高度重算 */
+const FocusDelays = [0, 60, 140, 240, 360, 520, 700, 900];
 
 export const ResultPreviewTable = () => {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -25,6 +31,12 @@ export const ResultPreviewTable = () => {
   const [previewPercent, customColumns, customRows] = useResultViewStore(
     useShallow((s) => [s.previewPercent, s.customColumns, s.customRows]),
   );
+  const focusToken = useResultViewStore(useShallow((s) => s.focusToken));
+  // 同一次打开只定位一次，之后用户切筛选 / 排序不再改变滚动位置
+  const handledFocusTokenRef = useRef(0);
+  // 定位用的定时器与最新行数据：不放进 effect 依赖，避免被 cleanup 清掉
+  const focusTimersRef = useRef<number[]>([]);
+  const finalDataRef = useRef<PreviewTableDataType>([]);
 
   const data = useData();
   const columns = useColumns();
@@ -122,12 +134,75 @@ export const ResultPreviewTable = () => {
     });
   }, [data, customRows]);
 
+  // 定位时读最新行数据（含自定义筛选 / 排序的结果）
+  finalDataRef.current = finalData;
+
   useEffect(() => {
     useResultViewStore.setState({
       customColumnsChanged: !customCompare(columns, finalColumns),
       customRowsChanged: !customCompare(data, finalData),
     });
   }, [finalColumns, finalData, data, columns]);
+
+  // 打开结果对比时定位到正在执行的任务；全部完成则回到表格最开始。
+  // 只依赖 focusToken 触发：finalData 会在挂载后因自定义筛选的初始化再变一次，
+  // 若把它写进依赖，cleanup 会把已排好的定时器清掉，定位就永远不生效。
+  useEffect(() => {
+    if (!focusToken || handledFocusTokenRef.current === focusToken) {
+      return;
+    }
+    const element = contentRef.current;
+    if (!element) {
+      return;
+    }
+    handledFocusTokenRef.current = focusToken;
+    const {
+      tableConfigOptions,
+      selectedConfigOptionIndex,
+      singleParamOrientation,
+    } = useResultViewStore.getState();
+    // 单参数「以行展示」时结果列是固定 key，其余情况的每一列都是对比维度的某个值
+    const isTransposed =
+      tableConfigOptions.length === 1 && singleParamOrientation === 'rows';
+    const currentOption = tableConfigOptions[selectedConfigOptionIndex ?? -1];
+    const resultKeys = isTransposed
+      ? [SingleParamResultKey]
+      : currentOption
+        ? getCases(currentOption)
+        : [];
+    // 表格会在数据变化后重挂载、并重新计算可视高度，抖动结束前多次校正，
+    // 保证最终停在进行中的那行（没有进行中的任务则回到最开始）
+    FocusDelays.forEach((delay) => {
+      focusTimersRef.current.push(
+        window.setTimeout(() => {
+          // 抽屉已关闭就不再干预
+          if (!element.isConnected) {
+            return;
+          }
+          const rows = finalDataRef.current;
+          if (!rows.length) {
+            return;
+          }
+          // 第一个还没出结果的行就是正在执行的位置；全都出完则为 -1
+          const index = findPendingRowIndex(rows, resultKeys);
+          focusTableRow(
+            element,
+            index >= 0 ? (rows[index]?.id ?? null) : null,
+            index,
+          );
+        }, delay),
+      );
+    });
+  }, [focusToken]);
+
+  // 定时器不跟随依赖清理，只在组件卸载时兜底
+  useEffect(
+    () => () => {
+      focusTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      focusTimersRef.current = [];
+    },
+    [],
+  );
 
   return (
     <div

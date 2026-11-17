@@ -65,7 +65,10 @@ export const usePreviewTableStore = create<
     if (row >= 0 && row < data.length && col >= 0 && col < columnList.length) {
       const rowData = data[row];
       const column = columnList[col];
-      return rowData[column.dataIndex as string] as PreviewTableCellValueType;
+      const value = rowData[column.dataIndex as string];
+      // 结果对比里的「提示词」「耗时」等列存的是纯文本，
+      // 统一在这里兜底成数组，避免调用方（相邻单元格预览 / 方向键切换）直接 .filter 崩掉
+      return Array.isArray(value) ? value : [];
     }
     return [];
   },
@@ -74,11 +77,13 @@ export const usePreviewTableStore = create<
     if (row >= 0 && row < data.length && col >= 0 && col < columnList.length) {
       const rowData = data[row];
       const column = columnList[col];
-      const value = rowData[
-        column.dataIndex as string
-      ] as PreviewTableCellValueType;
+      const value = rowData[column.dataIndex as string];
+      // 纯文本列没有可预览的资源，直接忽略
+      if (!Array.isArray(value)) {
+        return;
+      }
       const previewList: ResultItem[] = [];
-      value
+      (value as PreviewTableCellValueType)
         .filter((i) => ['image', 'video', 'audio'].includes(i.type))
         .forEach((value) =>
           value.value.forEach((i) =>

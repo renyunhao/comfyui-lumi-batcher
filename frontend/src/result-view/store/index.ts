@@ -28,6 +28,8 @@ interface ResultViewStateType {
   originRows: Array<AdvancedFilterItem>;
   customColumnsChanged: boolean;
   customRowsChanged: boolean;
+  /** 每次拉取完结果自增，用于触发一次「定位到正在执行的任务」 */
+  focusToken: number;
 
   /**
    * @param id 任务 id
@@ -43,6 +45,10 @@ interface ResultViewStateType {
   reset: () => void;
   openDrawer: () => Promise<void>;
 }
+
+/** focusToken 用全局自增，不随 reset 归零，保证每次结果就绪都能触发一次定位 */
+let focusTokenSeed = 0;
+export const nextFocusToken = () => (focusTokenSeed += 1);
 
 const defaultStore: Omit<
   ResultViewStateType,
@@ -61,6 +67,7 @@ const defaultStore: Omit<
   originRows: [],
   customColumnsChanged: false,
   customRowsChanged: false,
+  focusToken: 0,
 };
 
 export const useResultViewStore = create<ResultViewStateType>((set) => ({

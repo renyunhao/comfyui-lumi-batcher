@@ -30,7 +30,7 @@ import {
 const CustomParamsConfigFilters = 'custom_params_config_filters';
 
 /** 计算当前对比维度涉及的所有列 key（参数值 / 参数值组合） */
-const getCases = (s: ConfigOption): string[] => {
+export const getCases = (s: ConfigOption): string[] => {
   if (s.type === 'group') {
     const c = s as { type: string; values: ConfigOptionSimple[] };
     const maxLength = Math.max(...c.values.map((v) => v.values.length));
