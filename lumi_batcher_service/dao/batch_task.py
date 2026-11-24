@@ -6,7 +6,6 @@ import sqlite3
 import time
 
 from ..common.read_sql_file import read_sql_file
-from lumi_batcher_service.constant.task import CommonTaskStatus
 
 
 class BatchTaskDao:
@@ -241,6 +240,21 @@ class BatchTaskDao:
             print(f"An error occurred on update task content: {e.args[0]}")
             return None
 
+    def get_unfinished_tasks(self):
+        """取出所有仍在 waiting / running 的任务，用于重启后恢复被中断的执行"""
+        with sqlite3.connect(self.db_file) as conn:
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                sql = read_sql_file(
+                    os.path.join(self.sql_dir, "get_un_finish_list.sql")
+                )
+                cursor.execute(sql)
+                return [dict(row) for row in cursor.fetchall()]
+            except sqlite3.Error as e:
+                print(f"An error occurred on get unfinished tasks: {e.args[0]}")
+                return []
+
     def get_pause_requested_unfinished(self):
         """取出点了暂停、还没等当前项跑完就关掉 ComfyUI 的任务"""
         with sqlite3.connect(self.db_file) as conn:
@@ -264,59 +278,6 @@ class BatchTaskDao:
             except sqlite3.Error as e:
                 print(f"An error occurred on get pause requested tasks: {e.args[0]}")
                 return []
-
-    def update_on_reboot_room(self):
-        with sqlite3.connect(self.db_file) as conn:
-            try:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-
-                sql = read_sql_file(
-                    os.path.join(self.sql_dir, "get_un_finish_list.sql")
-                )
-                cursor.execute(sql)
-                rows = cursor.fetchall()
-                batch_task_ids = [row["id"] for row in rows]
-
-                for batch_task_id in batch_task_ids:
-                    batchTaskInfo = self.get_task_by_id(batch_task_id)
-                    queue_count = batchTaskInfo.get("queue_count")
-                    batch_task_status = batchTaskInfo.get("status")
-                    status_counts = json.loads(batchTaskInfo.get("status_counts"))
-
-                    success_count = status_counts.get(CommonTaskStatus.SUCCESS.value, 0)
-
-                    if success_count == queue_count:
-                        batch_task_status = CommonTaskStatus.SUCCESS.value
-                    elif success_count > 0 & success_count < queue_count:
-                        batch_task_status = CommonTaskStatus.PARTIAL_SUCCESS.value
-                    else:
-                        batch_task_status = CommonTaskStatus.FAILED.value
-
-                    # 更新批量任务消息
-                    messagesSet = set(json.loads(batchTaskInfo.get("messages", "[]")))
-                    messagesSet.add("房间重启")
-
-                    sql = read_sql_file(
-                        os.path.join(self.sql_dir, "update_on_reboot.sql")
-                    )
-
-                    cursor.execute(
-                        sql,
-                        (
-                            batch_task_status,
-                            json.dumps(status_counts),
-                            json.dumps(list(messagesSet)),
-                            batch_task_id,
-                        ),
-                    )
-
-                conn.commit()
-
-                # 返回受影响的行数
-                return cursor.rowcount
-            except sqlite3.Error as e:
-                print(f"An error occurred on update on reboot room: {e.args[0]}")
 
     def get_unpackage_list(self):
         with sqlite3.connect(self.db_file) as conn:

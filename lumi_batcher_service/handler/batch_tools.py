@@ -114,12 +114,11 @@ class BatchToolsHandler:
 
         self.resourceController = ResourceController(self)
 
-        # 重启恢复：先收敛「暂停请求中」的任务，让它们停在 paused 等待继续；
-        # 否则它们仍是 waiting/running，会被下面的逻辑判成失败而无法恢复
-        self.recover_pause_requested_tasks()
-        # 其余未完成任务按原有逻辑标记为房间重启导致失败
+        # 重启恢复：ComfyUI 异常关闭时任务会停在 waiting/running，
+        # 把被中断的子任务统一收敛为 paused，供用户点「继续」重跑
+        self.recover_interrupted_tasks()
+        # 兜底：父任务已结束、但仍残留在 running/pending 的子任务标记失败
         self.batchSubTaskDao.update_on_reboot_room()
-        self.batchTaskDao.update_on_reboot_room()
 
         def getApiPath(path):
             return "{}{}".format(self.api_prefix, path)
@@ -1025,35 +1024,32 @@ class BatchToolsHandler:
 
     # ---------- 准备态 / 开始 / 暂停 状态机辅助 ----------
 
-    def recover_pause_requested_tasks(self):
+    def recover_interrupted_tasks(self):
         """
-        启动时收敛「暂停请求中」的任务。
+        启动时恢复被异常中断的任务。
 
-        用户点了暂停但当前子任务还没跑完就关闭 ComfyUI 时，任务仍是
-        waiting/running 且带着 pause_requested 标记；若不处理，重启逻辑会
-        把它判成失败，用户就再也点不到「继续」。
+        ComfyUI 被异常关闭时不会触发 task_done 钩子，任务会停在
+        waiting/running，子任务停在 running/pending。这里冻结现场：把未完成
+        的子任务统一转为 paused、任务收敛为 paused，与主动暂停的状态一致；
+        用户点「继续」时再按各自的参数组合重建 prompt 重跑。
+        若中断前实际已全部产出结果，则直接收敛为终态，省掉多余的一次「继续」。
         """
-        tasks = self.batchTaskDao.get_pause_requested_unfinished()
+        tasks = self.batchTaskDao.get_unfinished_tasks() or []
+        recovered = 0
         for task in tasks:
             task_id = task.get("id")
             if not task_id:
                 continue
-            # 被中断的当前项也回到 paused，一并交给「继续」重建 prompt 重跑
-            self.batchSubTaskDao.pause_all_unfinished(task_id)
             try:
-                extra = json.loads(task.get("extra") or "{}")
-            except (ValueError, TypeError):
-                extra = {}
-            extra["pause_requested"] = False
-            self.batchTaskDao.update_property(
-                task_id, "extra", json.dumps(extra)
-            )
-            self.batchTaskDao.update_property(
-                task_id, "status", CommonTaskStatus.PAUSED.value
-            )
-        if tasks:
-            print(f"recover {len(tasks)} paused task(s) after reboot")
-        return len(tasks)
+                self.batchSubTaskDao.pause_all_unfinished(task_id)
+                self.finish_pause(task_id, task)
+                recovered += 1
+            except Exception as e:
+                print(f"recover interrupted task {task_id} failed: {e}")
+                traceback.print_exc()
+        if recovered:
+            print(f"recover {recovered} interrupted task(s) after reboot")
+        return recovered
 
     def get_queue_prompt_ids(self):
         """取 ComfyUI 队列里仍在 running / pending 的 prompt_id；取不到返回 None"""
